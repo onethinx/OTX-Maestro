@@ -1,4 +1,4 @@
-# Onethinx OTX Maestro for Windows
+# Onethinx OTX Maestro
 ## The Integrated Development Environment for the Onethinx LoRaWAN Core module
 
 Onethinx provides you with the software tools, libraries, and documentation to support the development process of innovative IoT solutions using the LoRa and LoRaWAN technology.
