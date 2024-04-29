@@ -9,9 +9,10 @@ Onethinx provides you with the software tools, libraries, and documentation to s
   - [Download and install Visual Studio Code](https://code.visualstudio.com/download)
   - Run Visual Studio Code
   - Install the cortex-meson-builder extension bundle:
-    - Open the Terminal panel: `Terminal` -> `New Terminal` or `CTRL+SHIFT+'`
-    - Paste the following command `code --install-extension rolfnoot.cortex-meson-builder` and press enter
-    - Wait till the extensions are fully installed and close VS Code (important)
+    - Open the Extension view by clicking the Extensions icon or press `Shift + CTRL/Command + X`
+    ![](https://raw.githubusercontent.com/onethinx/Readme_assets/main/VSCode-extensions.png) <br><br>
+    - Type `rolfnoot` in the searchbar and find the `Cortex Meson Builder` Extension pack
+    - Click `Install` and wait for the extensions to get installed
   - [Download the latest OTX-Maestro here](https://github.com/onethinx/OTX-Maestro-Windows/releases)
   - After installation, Visual Studio Code is ready to be used with the Onethinx Core Module
 
