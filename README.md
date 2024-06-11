@@ -13,7 +13,7 @@ Onethinx provides you with the software tools, libraries, and documentation to s
     ![](https://raw.githubusercontent.com/onethinx/Readme_assets/main/VSCode-extensions.png) <br><br>
     - Type `rolfnoot` in the searchbar and find the `Cortex Meson Builder` Extension pack
     - Click `Install` and wait for the extensions to get installed
-    - Close VS Code before installing OTX Maestro (important!) <br><br>
+    - Close VS Code before installing OTX Maestro (important!) (MAC users must quit VSCode, there shoud not be the white dot on VSCode) <br><br>
   - [Download the latest OTX-Maestro here](https://github.com/onethinx/OTX-Maestro-Windows/releases) and install
   - After installation, Visual Studio Code is ready to be used with the Onethinx Core Module
 
