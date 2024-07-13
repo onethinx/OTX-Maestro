@@ -1,0 +1,88 @@
+{
+  "name": "otx-maestro",
+  "displayName": "OTX Maestro",
+  "description": "A VS Code extension to support the Onethinx Core Module.",
+  "version": "1.0.3-pre.1",
+  "publisher": "Onethinx",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/onethinx/OTX-Maestro.git"
+  },
+  "engines": {
+    "vscode": "^1.50.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "tsc -p ./",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^14.14.6",
+    "@types/vscode": "^1.50.0",
+    "@typescript-eslint/eslint-plugin": "^4.6.1",
+    "@typescript-eslint/parser": "^4.6.1",
+    "eslint": "^7.12.1",
+    "typescript": "^4.0.3",
+    "vscode-test": "^1.4.0"
+  },
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "OTX Maestro Configuration",
+      "properties": {
+        "otx-maestro.defaultDebugger": {
+          "type": "string",
+          "default": "",
+          "description": "Default debugger"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "otx-maestro.updateProject",
+        "title": "Update Project"
+      },
+      {
+        "command": "otx-maestro.selProg",
+        "title": "Select Programmer"
+      },
+      {
+        "command": "otx-maestro.clean",
+        "title": "Clean-Reconfigure"
+      },
+      {
+        "command": "otx-maestro.build",
+        "title": "Build"
+      },
+      {
+        "command": "otx-maestro.launch",
+        "title": "Build-and-Launch"
+      }
+    ]
+  },
+  "keywords": [
+    "cortex-m",
+    "gdb",
+    "onethinx",
+    "otx-18",
+    "lorawan",
+    "debug",
+    "embedded"
+  ],
+  "extensionDependencies": [
+    "ms-vscode.cpptools",
+    "onethinx.cortex-gdb",
+    "mrmomo.meson-build",
+    "actboy168.tasks"
+  ]
+}

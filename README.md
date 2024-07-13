@@ -1,19 +1,43 @@
-# Onethinx OTX Maestro
-## The Integrated Development Environment for the Onethinx LoRaWAN Core module
+# Onethinx OTX Maestro README
 
-🚀 For Windows, MacOS and Linux. 🚀
+OTX Maestro is a Visual Studio Code extension designed to streamline the development of applications for the OTX-18 LoRaWAN module. Leveraging the Meson build system and the GNU ARM toolchain, OTX Maestro provides an integrated development environment within VS Code that simplifies building, compiling, and debugging projects. This extension is tailored for developers working with the OTX-18, enabling efficient and effective application development for LoRaWAN-based solutions.
 
-Onethinx provides you with the software tools, libraries, and documentation to support the development process of innovative IoT solutions using the LoRa and LoRaWAN technology.
+## Features
 
-## Download and install VS Code, extensions and OTX-Maestro
-  - [Download and install Visual Studio Code](https://code.visualstudio.com/download)
-  - Run Visual Studio Code
-  - Install the cortex-meson-builder extension bundle:
-    - Open the Extension view by clicking the Extensions icon or press `Shift + CTRL/Command + X`
-    ![](https://raw.githubusercontent.com/onethinx/Readme_assets/main/VSCode-extensions.png) <br><br>
-    - Type `rolfnoot` in the searchbar and find the `Cortex Meson Builder` Extension pack
-    - Click `Install` and wait for the extensions to get installed
-    - Close VS Code before installing OTX Maestro (important!) (MAC users must quit VSCode, there shoud not be the white dot on VSCode) <br><br>
-  - [Download the latest OTX-Maestro here](https://github.com/onethinx/OTX-Maestro-Windows/releases) and install
-  - After installation, Visual Studio Code is ready to be used with the Onethinx Core Module
+- **Easy Setup**: Quick and straightforward installation and configuration within Visual Studio Code.
+- **Easy Build and Program/Debug**: Simplified processes for building, programming, and debugging applications.
+- **Fully Integrated with VS Code**: Seamless integration with the Visual Studio Code environment, leveraging its tools and extensions.
+- **Enhanced User Experience**: Optimized interface and workflows to improve productivity and development experience.
+- **IntelliSense for C/C++**: Advanced code completion, linting, and syntax highlighting for C/C++ development.
 
+## Requirements
+
+- Windows, macOS, or Linux
+- Visual Studio Code
+- OTX Maestro Tools
+
+## Known Issues
+
+None reported to date.
+
+## Release Notes
+
+### 1.0.3
+
+- Standalone extension
+- Improved project update option
+
+### 1.0.2
+
+- Several improvements, including a programmer selection
+- Project update function
+
+### 1.0.1
+
+- Enhanced building with Meson
+
+### 1.0.0
+
+- Initial release of OTX Maestro, based on e.GO Powertools and CMake for building
+
+**Enjoy!**
