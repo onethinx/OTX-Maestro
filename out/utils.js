@@ -1,22 +1,46 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.substituteVariableRecursive = exports.substituteVariables = void 0;
-const vscode = require("vscode");
-const path = require("path");
+exports.substituteVariables = substituteVariables;
+exports.substituteVariableRecursive = substituteVariableRecursive;
+const vscode = __importStar(require("vscode"));
+const path = __importStar(require("path"));
 // Define variable names and regular expressions
 const variableNames = {
-    file: '${file}',
-    fileBasename: '${fileBasename}',
-    fileBasenameNoExtension: '${fileBasenameNoExtension}',
-    fileExtname: '${fileExtname}',
-    fileDirname: '${fileDirname}',
-    fileWorkspaceFolder: '${fileWorkspaceFolder}',
-    workspaceFolder: '${workspaceFolder}',
-    workspaceFolderBasename: '${workspaceFolderBasename}',
-    execPath: '${execPath}',
-    pathSeparator: '${pathSeparator}',
-    lineNumber: '${lineNumber}',
-    selectedText: '${selectedText}',
+    file: '${file}', // The current opened file (absolute path)
+    fileBasename: '${fileBasename}', // The current opened file's basename
+    fileBasenameNoExtension: '${fileBasenameNoExtension}', // The current opened file's basename with no file extension
+    fileExtname: '${fileExtname}', // The current opened file's extension
+    fileDirname: '${fileDirname}', // The current opened file's dirname
+    fileWorkspaceFolder: '${fileWorkspaceFolder}', // The current opened file's workspace folder
+    workspaceFolder: '${workspaceFolder}', // The path of the folder opened in VS Code
+    workspaceFolderBasename: '${workspaceFolderBasename}', // The name of the folder opened in VS Code without any slashes (/)
+    execPath: '${execPath}', // Location of Code.exe
+    pathSeparator: '${pathSeparator}', // `/` on macOS or linux, `\` on Windows
+    lineNumber: '${lineNumber}', // The current selected line number in the active file
+    selectedText: '${selectedText}', // The current selected text in the active file
     environmentVariable: '${env}',
     singleEnvironmentVariable: 'env',
     configurationVariable: '${config}',
@@ -106,7 +130,6 @@ function substituteVariables(str) {
     }
     return str;
 }
-exports.substituteVariables = substituteVariables;
 /**
  * Replace configuration variables in a string.
  * @param configName The configuration variable name.
@@ -146,5 +169,4 @@ function substituteVariableRecursive(arg) {
     }
     return arg;
 }
-exports.substituteVariableRecursive = substituteVariableRecursive;
 //# sourceMappingURL=utils.js.map

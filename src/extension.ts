@@ -6,7 +6,7 @@ import { promises as fsp } from 'fs';
 import * as path from 'path';
 import * as https from 'https';
 import { execSync } from 'child_process';
-import { substituteVariables, substituteVariableRecursive } from './utils'; // Adjust the path if necessary
+import { substituteVariables, substituteVariableRecursive } from './utils';
 
 // The minimum project version
 let thisVersion = '1.0.0';
@@ -64,7 +64,6 @@ export function deactivate() {}
 
 // Command callback functions
 async function preLaunch() {
-    //vscode.window.showInformationMessage('Pre-launch action triggered!');
     const ret = await build();
     console.log(`prelaunch result" ${ret}`);
     if (ret === '') {
