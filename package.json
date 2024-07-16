@@ -2,12 +2,13 @@
   "name": "otx-maestro",
   "displayName": "OTX Maestro",
   "description": "A VS Code extension to support the Onethinx Core Module.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "Onethinx",
   "repository": {
     "type": "git",
     "url": "https://github.com/onethinx/OTX-Maestro.git"
   },
+  "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.63.0"
   },
@@ -27,7 +28,7 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.91.0",
+    "@types/vscode": "^1.63.0",
     "@types/mocha": "^10.0.7",
     "@types/node": "20.x",
     "@typescript-eslint/eslint-plugin": "^7.14.1",
@@ -38,6 +39,12 @@
     "@vscode/test-electron": "^2.4.0"
   },
   "contributes": {
+    "jsonValidation": [
+      {
+          "fileMatch": ".vscode/tasks.json",
+          "url": "./src/tasks-schema.json"
+      }
+   ],
     "configuration": {
       "type": "object",
       "title": "OTX Maestro Configuration",
@@ -84,7 +91,6 @@
   "extensionDependencies": [
     "ms-vscode.cpptools",
     "onethinx.cortex-gdb",
-    "mrmomo.meson-build",
-    "actboy168.tasks"
+    "mrmomo.meson-build"
   ]
 }

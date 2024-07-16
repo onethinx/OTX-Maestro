@@ -10,12 +10,17 @@ import { substituteVariables, substituteVariableRecursive } from './utils';
 
 // The minimum project version
 let thisVersion = '1.0.0';
-let minToolsVersion = '1.0.2';
+const minToolsVersion = '1.0.2';
+let maestroToolsVersion = '1.0.0';
+const updateLocation = 'https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/update.json';
+let currentProject: { version: string, updatePackage: string } = { version: '1.0.0', updatePackage: updateLocation };
 
 const defaultSettings: { [key: string]: string } = {
     defaultDebugger: '',
-    someOtherSetting: '',
+   //' someOtherSetting: '',
 };
+
+let notJlink = true;
 
 const config = vscode.workspace.getConfiguration('otx-maestro');
 
@@ -24,40 +29,127 @@ function getSetting(setting: string): string {
     return (config.get<string>(setting) || defaultSettings[setting]) ?? '';
 }
 
+function evaluateTemplate(val: any) {
+    try{
+        const match = val.match(/\$\{(\w+)\}/);
+        return match ? eval(match[1]) : val;
+    }
+    catch{}
+    return val;
+}
+
+export function activate2(context: vscode.ExtensionContext) {
+}
+
 export function activate(context: vscode.ExtensionContext) {
     thisVersion = context.extension.packageJSON.version;
-    // Define the commands array with button texts
-    const commands = [
-        { command: 'otx-maestro.preLaunch', callback: preLaunch, buttonText: "" },
-        { command: 'otx-maestro.updateProject', callback: updateProject, buttonText: "$(notebook-render-output) Update Project" },
-        { command: 'otx-maestro.selectProgrammer', callback: selectProgrammer, buttonText: "$(wrench) Select Programmer" },
-        { command: 'otx-maestro.clean', callback: clean, buttonText: "$(references) Clean-Reconfigure" },
-        { command: 'otx-maestro.build', callback: build, buttonText: "$(file-binary) Build" },
-        { command: 'otx-maestro.launch', callback: launch, buttonText: "$(rocket) Build-and-Launch" }
-    ];
+    notJlink = selectProg('', true).currentProgrammer !== 'jlink';
 
-    // Register the commands and create status bar items if buttonText is provided
-    for (const { command, callback, buttonText } of commands) {
-        const disposable = vscode.commands.registerCommand(command, callback);
-        context.subscriptions.push(disposable);
+    const statusBarItem = vscode.window.createStatusBarItem();
+    statusBarItem.text = `$(zap)OTX-Maestro$(zap)`;
+    statusBarItem.tooltip = new vscode.MarkdownString(`OTX-Maestro v${thisVersion}\n\n[Learn More](https://example.com)`);
+    statusBarItem.command = 'extension.showDetails';
+    statusBarItem.color = '#25C0D8';
+    statusBarItem.show();
+    context.subscriptions.push(statusBarItem);
 
-        if (buttonText) {
-            const button = vscode.window.createStatusBarItem();
-            button.text = buttonText;
-            button.command = command;
-            button.show();
-            context.subscriptions.push(button);
-        }
+    context.subscriptions.push(vscode.commands.registerCommand('extension.showDetails', () => {
+        try {
+            currentProject = getJSON(['.vscode', 'project.json']);
+            if (!currentProject.version) { throw new Error(); };
+        } catch {}
+        const message = `OTX Maestro v${thisVersion}\nOTX Maestro Tools v${maestroToolsVersion}\nOTX Maestro Project v${currentProject.version}`;
+        vscode.window.showInformationMessage(message, { modal: true });
+    }));
+
+
+    // Read task and add to taskbar if necessary 
+    const tasksConfig = vscode.workspace.getConfiguration('tasks');
+    if (tasksConfig.tasks && Array.isArray(tasksConfig.tasks)) {
+        tasksConfig.tasks.forEach(task => {
+            //console.log('Task:', task); // Print each task to verify its structure
+            const taskOptions = task.options || {};
+            const itemHide = evaluateTemplate(taskOptions.statusbar?.hide);
+            //const itemHide =taskOptions.statusbar?.hide;
+            if (itemHide === undefined || itemHide === false) {
+                const statusBarItem = vscode.window.createStatusBarItem();
+                statusBarItem.text =  (taskOptions.statusbar?.label ?? '' !== '')? taskOptions.statusbar.label : task.label;
+                
+                statusBarItem.command = {
+                    command: 'otx-maestro.runTask',
+                    title: task.label,
+                    arguments: [task],
+                };
+                if (taskOptions.statusbar?.color ?? '' !== '') { statusBarItem.color = taskOptions.statusbar.color; }
+                if (taskOptions.statusbar?.detail ?? '' !== '') { statusBarItem.tooltip = taskOptions.statusbar.detail; }
+                statusBarItem.show();
+                context.subscriptions.push(statusBarItem);
+            }
+        });
+
+        context.subscriptions.push(vscode.commands.registerCommand('otx-maestro.runTask', async (task: any) => {
+            if (task.command === '${command:otx-maestro.clean}')
+            {
+                clean();
+            }
+            else if (task.command=== '${command:otx-maestro.build}')
+            {
+                build();
+            }
+            else if (task.command=== '${command:otx-maestro.launch}')
+            {
+                launch();
+            }
+            else if (task.command=== '${command:otx-maestro.prelaunch}')
+            {
+                preLaunch();
+            }
+            else {
+                vscode.tasks.executeTask(new vscode.Task(
+                    { type: task.type, task: task.label },
+                    vscode.TaskScope.Workspace,
+                    task.label,
+                    'Workspace',
+                    new vscode.ShellExecution(task.command, task.args)
+                ));
+            }
+        }));
     }
 
-    const maestroToolsVersion = checkToolsVersion();
+    // Define the commands array 
+    const commands = [
+        { command: 'otx-maestro.preLaunch',         callback: preLaunch },
+        { command: 'otx-maestro.updateProject',     callback: updateProject },
+        { command: 'otx-maestro.selectProgrammer',  callback: selectProgrammer },
+        { command: 'otx-maestro.clean',             callback: clean },
+        { command: 'otx-maestro.build',             callback: build },
+        { command: 'otx-maestro.launch',            callback: launch}
+    ];
+
+    // Register the commands
+    for (const { command, callback } of commands) {
+        const disposable = vscode.commands.registerCommand(command, callback);
+        context.subscriptions.push(disposable);
+    }
+
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async (event) => {
+        if (event.affectsConfiguration('tasks')) {
+            // Refresh tasks if the tasks configuration has changed
+            const confirm = await vscode.window.showInformationMessage(
+                'Tasks configuration changed. Do you want to reload the window to apply changes?', { modal: true }, 'Yes', 'No'
+            );
+            if (confirm === 'Yes') {
+                vscode.commands.executeCommand('workbench.action.reloadWindow');
+            }
+        }
+    }));
+
+    maestroToolsVersion = checkToolsVersion();
     const compare = versionCompare(minToolsVersion, maestroToolsVersion);
     if (compare === 'h') {
         vscode.window.showErrorMessage(`Please update OTX Maestro Tools\nneeded: ${minToolsVersion}\n got: ${maestroToolsVersion}`, { modal: true });
         return;
     }
-    vscode.window.showInformationMessage(`OTX-Maestro Tools Version: ${maestroToolsVersion}`);
-    
 }
 
 export function deactivate() {}
@@ -147,7 +239,6 @@ async function updateFile(folder: string, file: string): Promise<void> {
     if (!basePath) { throw new Error("Workspace folder is not defined."); };
     const vsCodePath = path.join(basePath, folder, file);
     const folderWithSlash = folder ? folder + '/' : '';
-    //await downloadFile(`https://raw.githubusercontent.com/onethinx/Maestro-lib/main/${folderWithSlash}${file}`, vsCodePath);
     await getFileFromUrl(`https://raw.githubusercontent.com/onethinx/Maestro-lib/main/${folderWithSlash}${file}`, vsCodePath).catch(err => console.error('Error downloading file:', err));
 }
 
@@ -163,26 +254,21 @@ async function removeFile(folder: string, file: string): Promise<void> {
     }
 }
 
-function getProject()
-{
+function getJSON(pathSegments: string[]) {
     const basePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
     if (!basePath) { throw new Error("Workspace folder is not defined."); };
-    const packageJsonPath = path.join(basePath, '.vscode','project.json');
+    const packageJsonPath = path.join(basePath, ...pathSegments);
     const packageJsonContent = fs.readFileSync(packageJsonPath, 'utf8');
     return JSON.parse(packageJsonContent);
 }
 
 async function updateProject() {
-    //let onlinePrjVersion = '1.0.0';
-    //let currentPrjVersion = '1.0.0';
-    let updateLocation = 'https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/update.json';
-    let currentProject: { version: string, updatePackage: string } = { version: '1.0.0', updatePackage: updateLocation };
     let onlineProject= currentProject;
     let updatePackage;
     try {
         const onlinePrjFile = await getFileFromUrl("https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/project.json", '', false);
         onlineProject = JSON.parse(onlinePrjFile);
-        currentProject = getProject();
+        currentProject = getJSON(['.vscode', 'project.json']);
         if (!currentProject.version || !onlineProject.version) { throw new Error(); };
     } catch (error) {
         vscode.window.showErrorMessage(`Error fetching version: ${(error as Error).message || 'unknown error'}`);
@@ -248,14 +334,6 @@ async function updateProject() {
         console.log(`remove: ${dir} ${filename}`);
         await removeFile(dir, filename);
     }
-
-    // await updateFile("", 'meson.build');
-    // await updateFile("", 'cross_gcc.build');
-    // await updateFile(".vscode", 'launch.json');
-    // await updateFile(".vscode", 'settings.json');
-    // await updateFile(".vscode", 'tasks.json');
-    // await updateFile(".vscode", 'c_cpp_properties.json');
-    // await updateFile(".vscode", 'meson.js');
     vscode.window.showInformationMessage(`Project updated to Version: ${onlineProject.version}`);
 }
 
@@ -265,15 +343,28 @@ function versionCompare(versionIn: string, versionMinimum: string): 'l' | 'h' | 
     return vIn < vRef ? 'l' : vIn > vRef ? 'h' : 'e';
 }
 
-async function clean() {
-	diagnosticCollection.clear();
+enum taskResult {
+    ok,
+    errorSilent,
+    errorInform,
+    errorConfirm
+}
+function taskStatus(message: string, succeeded: taskResult): string | null {
+    if (succeeded !== taskResult.ok && succeeded !== taskResult.errorSilent )
+    {
+        vscode.window.showErrorMessage(message, { modal: succeeded === taskResult.errorConfirm });
+    }
+    return succeeded === taskResult.ok? '' : null;
+}
 
+async function clean(): Promise<string | null>  {
+	diagnosticCollection.clear();
     const setupResult = checkSetup();
     if (setupResult.status === 'error') {
-        vscode.window.showErrorMessage(`The Clean task terminated with exit status: ${setupResult.status}\r\n${setupResult.message}\r\nPlease Clean-Reconfigure.`, { modal: true });
-        return;
+        const msg = `The Clean task terminated with exit status: ${setupResult.status}\r\n${setupResult.message}\r\nPlease Clean-Reconfigure.`;
+        return taskStatus(msg, taskResult.errorConfirm);
     }
-
+    
     const buildFolder = path.join(setupResult.basePath, "build");
     if (setupResult.status === 'missing') {await fs.promises.mkdir(buildFolder);}
     else {
@@ -299,55 +390,58 @@ async function clean() {
     }
 
     let ret = await executeTask("Creator: postbuild");
-    if (ret === undefined) { return; }
+    //if (ret === undefined) { return taskStatus('Clean', false); }
     if (ret !== 0) {
-        vscode.window.showErrorMessage("The Creator Postbuild task terminated with exit code:" + JSON.stringify(ret));
-        return;
+        const msg = `The Creator Postbuild task terminated with exit code: ${JSON.stringify(ret)}`;
+        return taskStatus(msg, taskResult.errorInform);
     }
+    
     const crossBuildFile = path.join(setupResult.basePath, "cross_gcc.build");
     await updateMeson(crossBuildFile, [], []);
     const mesonBuildFile = path.join(setupResult.basePath, "meson.build");
     await updateMeson(mesonBuildFile, [], []);
 
     ret = await executeTask("Meson: configure");
-    if (ret === undefined) { return; }
+    if (ret === null) { return taskStatus('Error Task Meson Configure', taskResult.errorInform); }
     const mesonResult = await parseMesonLog();
     if (ret !== 0) 
     {
-        vscode.window.showErrorMessage(`The Configure task terminated with exit code: ${JSON.stringify(ret)}`);
+        //vscode.window.showErrorMessage(`The Configure task terminated with exit code: ${JSON.stringify(ret)}`);
         if (mesonResult.errorCount > 0) {
             vscode.commands.executeCommand('workbench.action.problems.focus');
         }
+        const msg = `The Configure task terminated with exit code: ${JSON.stringify(ret)}`;
+        return taskStatus(msg, taskResult.errorInform);
     }
     const selProgResult = selectProg("", true);
-    if (selProgResult === "" || selProgResult === "default") {	// Current programmer is default or not set?
+    if (selProgResult.useDefault === true || selProgResult.currentProgrammer === "") {	// Current programmer is default or not set?
         var currentProgrammer = getSetting('defaultDebugger');
+        //console.log(`default: ${currentProgrammer}`);
         if (currentProgrammer === "")
         { // Default programmer isn't set > show picker
             await selectProgrammer();
         }
         else
         {	// Default set, select programmer
-            //console.log(`default: ${currentProgrammer}`);
             selectProg("default");
         }
     }
-    return '';
+    return taskStatus('', taskResult.ok);
 }
 
-async function build() {
+async function build(): Promise<string | null>  {
     diagnosticCollection.clear();
     const setupResult = checkSetup();
     if (setupResult.status !== 'ok') {
-        vscode.window.showErrorMessage(`The Build task terminated with exit status: ${setupResult.status}\r\n${setupResult.message}\r\nPlease Clean-Reconfigure.`, { modal: true });
-        return;
+        const msg = `The Clean task terminated with exit status: ${setupResult.status}\r\n${setupResult.message}\r\nPlease Clean-Reconfigure.`;
+        return taskStatus(msg, taskResult.errorConfirm);
     }
 
     const sourcePath = path.join(setupResult.basePath, "source");
     const mesonBuildFile = path.join(setupResult.basePath, "meson.build");
     if (!fs.existsSync(mesonBuildFile)) {
-        vscode.window.showErrorMessage("meson.build file not found!");
-        return;
+        const msg = `meson.build file not found!`;
+        return taskStatus(msg, taskResult.errorInform);
     }
 
     const headerContents = readDirectory(setupResult.basePath, [], sourcePath, '.h', true);
@@ -357,28 +451,26 @@ async function build() {
     updateMeson(mesonBuildFile, headerContents, sourceContents);
 
     const ret = await executeTask("Meson: build");
-    if (ret === undefined) { return; }
+    if (ret === null) { return taskStatus("error meson build", taskResult.errorInform); }
     const mesonResult = await parseMesonLog();
     if (ret !== 0) 
     {
-        vscode.window.showErrorMessage(`The Build task terminated with exit code: ${JSON.stringify(ret)}`);
+        //vscode.window.showErrorMessage(`The Build task terminated with exit code: ${JSON.stringify(ret)}`);
        // if (mesonResult.errorCount > 0) {
-            vscode.commands.executeCommand('workbench.action.problems.focus');
-      //  }
-        return;
+        vscode.commands.executeCommand('workbench.action.problems.focus');
+        const msg = `The Build task terminated with exit code: ${JSON.stringify(ret)}`;
+        return taskStatus(msg, taskResult.errorInform);
     }
-    return '';
+    return taskStatus('', taskResult.ok);
 }
 
-async function launch() {
+async function launch(): Promise<string | null>  {
     // var ret = await vscode.commands.executeCommand('workbench.action.debug.run');
     // var ret = await vscode.commands.executeCommand('workbench.action.debug.selectandstart');
     //vscode.commands.executeCommand('workbench.action.terminal.focus');
     var ret = await vscode.commands.executeCommand('workbench.action.debug.start');
-    //var ret = await build();
     console.log(`launch ${ret}`);
-    
-    return ret;
+    return taskStatus('', taskResult.ok);
 };
 
 
@@ -411,9 +503,9 @@ async function selectProgrammer() {
         { s: "ti-icdi", l: "TI ICDI JTAG Programmer" },
     ];
     // Check for default programmer
-    var currentProgrammer = getSetting('defaultDebugger');
-    if (currentProgrammer === '') { currentProgrammer = selectProg("", true); }
-    if (currentProgrammer === '') { return; }
+    let currentProgrammer = getSetting('defaultDebugger');
+    let useDefault = false;
+    if (currentProgrammer === '') { ( {useDefault, currentProgrammer} = selectProg("", true)); }
 
     const index = programmers.findIndex(prog => prog.s === currentProgrammer);
     console.log(`${currentProgrammer} - ${index}`);
@@ -433,16 +525,27 @@ async function selectProgrammer() {
     quickPick.show();
 
     // Handle the selection
-    quickPick.onDidAccept(() => {
+    quickPick.onDidAccept(async () => {
         const selected = quickPick.selectedItems[0];
         if (selected) {
-            // Handle the selected value here
             //console.log("Selected programmer:", selected.label);
             const programmer = programmers.find(prog => prog.l === selected.label);
             if (programmer)
             {
-                vscode.window.showInformationMessage(`You selected: ${selected.label}`);
-                selectProg(programmer.s);
+                const currentProg = selectProg(programmer.s).currentProgrammer;
+                const msg = (programmer.s === 'default')? `Default ('${currentProg}' in settings.json)` : selected.label;
+                vscode.window.showInformationMessage(`You selected: ${msg}`);
+                const isJlink = currentProg === 'jlink';
+                if (isJlink === notJlink) {
+                // Refresh tasks if the tasks configuration has changed
+                    const confirm = await vscode.window.showInformationMessage(
+                        'The JLink configuration is changed. Do you want to reload the window to apply changes?', { modal: true }, 'Yes', 'No'
+                    );
+                    if (confirm === 'Yes') {
+                        vscode.commands.executeCommand('workbench.action.reloadWindow');
+                    }
+                    notJlink = !isJlink;
+                }
             }
             quickPick.dispose();
         }
@@ -459,66 +562,82 @@ function checkSetup(): {status: string, message: string, basePath: string} {
     if (!fs.existsSync(path.join(buildDir, "meson-logs"))) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder", 'basePath': basePath }; }
     if (!fs.existsSync(path.join(buildDir, "build.ninja"))) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder", 'basePath': basePath }; }
     if (!fs.existsSync(path.join(buildDir, "compile_commands.json"))) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder", 'basePath': basePath }; }
+    try{
+        const mesonInfo = getJSON(['build', 'meson-info', 'meson-info.json']);
+        const source = mesonInfo.directories.source;
+        let resPath1 = '1'; 
+        let resPath2 = '2';
+        try {
+            resPath1 = fs.realpathSync.native(mesonInfo.directories.source);
+            resPath2 = fs.realpathSync.native(basePath);
+        } catch  { }
+        console.log(`source ${resPath1} !== basePath ${resPath2}`);
+        if (resPath1 !== resPath2) { return { 'status': 'mismatch', 'message': "Path mismatch, probably some folders changed", 'basePath': basePath }; }
+    }
+    catch{};
     return { 'status': 'ok', 'message': "OK", 'basePath': basePath };
 }
 
 function updateMeson(mesonFile: string, headerContents: string[], sourceContents: string[]) {
-        const mesonContents = fs.readFileSync(mesonFile, 'utf-8');
-        let arr: string[] = [];
-        let logOut = true;
-        let linesStripped = 0;
+    const mesonContents = fs.readFileSync(mesonFile, 'utf-8');
+    let arr: string[] = [];
+    let logOut = true;
+    let linesStripped = 0;
 
-        mesonContents.split(/\r?\n/).forEach((line: string) => {
-                if (line.includes("OTX_Extension_HeaderFiles_End") || line.includes("OTX_Extension_SourceFiles_End")) { logOut = true; }
-                if (logOut) { arr.push(line); }
-                if (linesStripped > 0 && --linesStripped === 0) { logOut = true; }
-                if (line.includes("OTX_Extension_HeaderFiles_Start")) {
-                        arr = arr.concat(headerContents);
-                        logOut = false;
-                } else if (line.includes("OTX_Extension_SourceFiles_Start")) {
-                        arr = arr.concat(sourceContents);
-                        logOut = false;
-                } else if (line.includes("OTX_Extension_print")) {
-                        const regexp = /\(\s*(.*[^ ])[ )]+$/;
-                        const array = line.match(regexp);
-                        if (array !== null)
-                                { arr = arr.concat(substituteVariables(array[1])); }
-                        else
-                                { arr = arr.concat('Not found!'); }
-                        logOut = false;
-                        linesStripped = 1;
-                }
-        });
+    mesonContents.split(/\r?\n/).forEach((line: string) => {
+            if (line.includes("OTX_Extension_HeaderFiles_End") || line.includes("OTX_Extension_SourceFiles_End")) { logOut = true; }
+            if (logOut) { arr.push(line); }
+            if (linesStripped > 0 && --linesStripped === 0) { logOut = true; }
+            if (line.includes("OTX_Extension_HeaderFiles_Start")) {
+                    arr = arr.concat(headerContents);
+                    logOut = false;
+            } else if (line.includes("OTX_Extension_SourceFiles_Start")) {
+                    arr = arr.concat(sourceContents);
+                    logOut = false;
+            } else if (line.includes("OTX_Extension_print")) {
+                    const regexp = /\(\s*(.*[^ ])[ )]+$/;
+                    const array = line.match(regexp);
+                    if (array !== null)
+                            { arr = arr.concat(substituteVariables(array[1])); }
+                    else
+                            { arr = arr.concat('Not found!'); }
+                    logOut = false;
+                    linesStripped = 1;
+            }
+    });
 
-        const contents = arr.join('\n');
-        // console.log(contents);
-        if (contents === mesonContents) {return;}
-        writeFile(mesonFile, contents);
+    const contents = arr.join('\n');
+    // console.log(contents);
+    if (contents === mesonContents) {return;}
+    writeFile(mesonFile, contents);
+}
+
+async function getTask(taskName: string): Promise<vscode.Task | undefined> {   
+    const tasks = await vscode.tasks.fetchTasks();
+    for (const task of tasks) {
+        if (task.name === taskName) {
+            return task;
+        }
+    }
+    vscode.window.showErrorMessage(`Cannot find ${taskName} task.`);
 }
 
 async function executeTask(taskName: string): Promise<number | undefined> {   
-    const tasks = await vscode.tasks.fetchTasks();
-    let task: vscode.Task | undefined = undefined;
-    for (const t of tasks) {
-        if (t.name === taskName) {
-            task = t;
-            break;
-        }
-    }
-    if (!task) {
-        vscode.window.showErrorMessage(`Cannot find ${taskName} task.`);
-        return;
-    }
-    const taskExecution = await vscode.tasks.executeTask(task);
-    return new Promise<number | undefined>((resolve) => {
-        const disposable = vscode.tasks.onDidEndTaskProcess(e => {
-            if (e.execution === taskExecution || e.execution.task === task) {
-                disposable.dispose();
-                resolve(e.exitCode);
-            }
+    const task = await getTask(taskName);
+    console.log(`--- execute task: ${taskName}`);
+    if (task) {
+        const taskExecution = await vscode.tasks.executeTask(task);
+        return new Promise<number | undefined>((resolve) => {
+            const disposable = vscode.tasks.onDidEndTaskProcess(e => {
+                if (e.execution === taskExecution || e.execution.task === task) {
+                    disposable.dispose();
+                    resolve(e.exitCode);
+                }
+            });
         });
-    });
+    }
 }
+
 
 function checkToolsVersion(): string {
     try {
@@ -526,12 +645,11 @@ function checkToolsVersion(): string {
         const stdout = execSync(versionGet);
         return stdout.toString().trim();
     } catch (error) {
-    //console.error("Error:", error);
             return "1.0.0";
     }
 }
 
-function selectProg(programmer: string, checkOnly: boolean = false): string {
+function selectProg(programmer: string, checkOnly: boolean = false): {useDefault: boolean, currentProgrammer: string} {
     // Substitute environment variables and get the base path
     const basePath = substituteVariables('${env:ONETHINX_PACK_LOC}');
     const sourceFile = path.join(basePath, 'config', 'scripts', 'brd.cfg');
@@ -546,7 +664,7 @@ function selectProg(programmer: string, checkOnly: boolean = false): string {
             fs.copyFileSync(sourceFile, boardSettingsFile);
         } catch (err) {
             vscode.window.showErrorMessage(`File copy error: ${err instanceof Error ? err.message : 'Unknown error'}`);
-            return '';
+            return {useDefault: false, currentProgrammer: ''};
         }
     }
 
@@ -563,7 +681,7 @@ function selectProg(programmer: string, checkOnly: boolean = false): string {
     let currentUseDefault = useDefaultMatch ? useDefaultMatch[1] === 'true' : true;
 
     if (checkOnly) {
-        return currentProgrammer === '' ? '' : (currentUseDefault ? 'default' : currentProgrammer);
+        return {useDefault: currentUseDefault, currentProgrammer: currentProgrammer};
     }
 
     // Determine if the new programmer is 'default'
@@ -575,7 +693,7 @@ function selectProg(programmer: string, checkOnly: boolean = false): string {
                 'No default programmer set! Please set the correct programmer in settings.json\nExample: "otx-maestro.defaultDebugger": "cmsis-dap"',
                 { modal: true }
             );
-            return '';
+            return {useDefault: true, currentProgrammer: ''};
         }
     }
 
@@ -588,11 +706,11 @@ function selectProg(programmer: string, checkOnly: boolean = false): string {
     }
 
     const contents = lines.join('\n');
-    if (contents === boardSettingsContent) {return '';}
+    if (contents === boardSettingsContent) {return {useDefault: currentUseDefault, currentProgrammer: programmer};}
 
     writeFile(boardSettingsFile, contents);
 
-    return currentProgrammer;
+    return {useDefault: currentUseDefault, currentProgrammer: programmer};
 }
 
 async function writeFile(fileName: string, contents: string): Promise<void> {

@@ -1,0 +1,69 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Custom VS Code Tasks",
+    "description": "Schema for custom VS Code tasks with additional statusbar fields",
+    "type": "object",
+    "properties": {
+        "version": {
+            "type": "string",
+            "description": "The version of the tasks.json file"
+        },
+        "tasks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "description": "The label of the task"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "The type of the task"
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "The command to execute"
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Arguments passed to the command"
+                    },
+                    "options": {
+                        "type": "object",
+                        "properties": {
+                            "statusbar": {
+                                "type": "object",
+                                "properties": {
+                                    "label": {
+                                        "type": "string",
+                                        "description": "Label to display in the status bar"
+                                    },
+                                    "color": {
+                                        "type": "string",
+                                        "description": "Color of the status bar item"
+                                    },
+                                    "detail": {
+                                        "type": "string",
+                                        "description": "Detail description for the status bar item"
+                                    },
+                                    "hide": {
+                                        "type": "boolean",
+                                        "description": "Hide status bar item"
+                                    }
+                                },
+                                "additionalProperties": false
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["label", "type", "command"]
+            }
+        }
+    },
+    "required": ["version", "tasks"]
+}
