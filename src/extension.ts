@@ -47,7 +47,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const statusBarItem = vscode.window.createStatusBarItem();
     statusBarItem.text = `$(zap)OTX-Maestro$(zap)`;
-    statusBarItem.tooltip = new vscode.MarkdownString(`OTX-Maestro v${thisVersion}\n\n[Learn More](https://example.com)`);
+    statusBarItem.tooltip = new vscode.MarkdownString(`OTX-Maestro v${thisVersion}\n\n[Learn More](https://onethinx.com)`);
     statusBarItem.command = 'extension.showDetails';
     statusBarItem.color = '#25C0D8';
     statusBarItem.show();
@@ -268,7 +268,10 @@ async function updateProject() {
     try {
         const onlinePrjFile = await getFileFromUrl("https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/project.json", '', false);
         onlineProject = JSON.parse(onlinePrjFile);
-        currentProject = getJSON(['.vscode', 'project.json']);
+        try{
+            currentProject = getJSON(['.vscode', 'project.json']);
+        }
+        catch {}
         if (!currentProject.version || !onlineProject.version) { throw new Error(); };
     } catch (error) {
         vscode.window.showErrorMessage(`Error fetching version: ${(error as Error).message || 'unknown error'}`);
