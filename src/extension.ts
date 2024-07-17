@@ -13,7 +13,6 @@ let thisVersion = '1.0.0';
 const minToolsVersion = '1.0.2';
 let maestroToolsVersion = '1.0.0';
 const updateLocation = 'https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/update.json';
-let currentProject: { version: string, updatePackage: string } = { version: '1.0.0', updatePackage: updateLocation };
 
 const defaultSettings: { [key: string]: string } = {
     defaultDebugger: '',
@@ -47,21 +46,40 @@ export function activate(context: vscode.ExtensionContext) {
 
     const statusBarItem = vscode.window.createStatusBarItem();
     statusBarItem.text = `$(zap)OTX-Maestro$(zap)`;
-    statusBarItem.tooltip = new vscode.MarkdownString(`OTX-Maestro v${thisVersion}\n\n[Learn More](https://onethinx.com)`);
+    statusBarItem.tooltip = new vscode.MarkdownString(`OTX-Maestro v${thisVersion}\n\n[Learn More](https://github.com/onethinx/OTX-Maestro/blob/main/README.md)`);
     statusBarItem.command = 'extension.showDetails';
     statusBarItem.color = '#25C0D8';
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
 
     context.subscriptions.push(vscode.commands.registerCommand('extension.showDetails', () => {
-        try {
-            currentProject = getJSON(['.vscode', 'project.json']);
-            if (!currentProject.version) { throw new Error(); };
-        } catch {}
-        const message = `OTX Maestro v${thisVersion}\nOTX Maestro Tools v${maestroToolsVersion}\nOTX Maestro Project v${currentProject.version}`;
+        const currentProject = getCurrentProject();
+        let message = `OTX Maestro v${thisVersion}
+        OTX Maestro Tools v${maestroToolsVersion}
+        OTX Maestro Project v${currentProject.version}`;
+        
+        const deprecatedExtensions = [
+            //'ms-vscode.cpptools',
+            'rolfnoot.cortex-meson-builder',
+            'marus25.cortex-debug',
+            'egomobile.vscode-powertools',
+            'actboy168.tasks'
+        ];
+        
+        const installedExtensions = vscode.extensions.all.map(ext => ext.id.toLowerCase());
+        const foundExtensions = deprecatedExtensions.filter(extId => installedExtensions.includes(extId));
+        
+        if (foundExtensions.length > 0)
+        {
+            message += `\n\nOTX-Maestro doesn't need these extensions anymore:\n${foundExtensions.join('\n')}`;
+        }
+        
         vscode.window.showInformationMessage(message, { modal: true });
     }));
 
+
+
+    updateProject(true) ;
 
     // Read task and add to taskbar if necessary 
     const tasksConfig = vscode.workspace.getConfiguration('tasks');
@@ -254,35 +272,50 @@ async function removeFile(folder: string, file: string): Promise<void> {
     }
 }
 
-function getJSON(pathSegments: string[]) {
-    const basePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-    if (!basePath) { throw new Error("Workspace folder is not defined."); };
-    const packageJsonPath = path.join(basePath, ...pathSegments);
-    const packageJsonContent = fs.readFileSync(packageJsonPath, 'utf8');
-    return JSON.parse(packageJsonContent);
+enum returnedContent {
+    fullString,
+    firstLine,
+    parsedJson
 }
 
-async function updateProject() {
-    let onlineProject= currentProject;
+function getFile(pathSegments: string[], content: returnedContent) {
+    const basePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+    if (!basePath) {
+        throw new Error("Workspace folder is not defined.");
+    }
+    const packageJsonPath = path.join(basePath, ...pathSegments);
+    const packageJsonContent = fs.readFileSync(packageJsonPath, 'utf8');
+
+    switch (content) {
+        case returnedContent.fullString:
+            return packageJsonContent;
+        case returnedContent.firstLine:
+            return packageJsonContent.split('\n')[0];
+        case returnedContent.parsedJson:
+            return JSON.parse(packageJsonContent);
+    }
+}
+
+async function updateProject(startup = false) {
+    let currentProject = getCurrentProject();
+    let onlineProject = currentProject;
     let updatePackage;
     try {
         const onlinePrjFile = await getFileFromUrl("https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/project.json", '', false);
         onlineProject = JSON.parse(onlinePrjFile);
-        try{
-            currentProject = getJSON(['.vscode', 'project.json']);
-        }
-        catch {}
         if (!currentProject.version || !onlineProject.version) { throw new Error(); };
     } catch (error) {
         vscode.window.showErrorMessage(`Error fetching version: ${(error as Error).message || 'unknown error'}`);
         return;
     }
-
     if (versionCompare(onlineProject.version, currentProject.version) !== 'h') {
-        await vscode.window.showInformationMessage(
-            'No newer project version found online.', 
-            { modal: true }
-        );
+        if (!startup)
+        {
+            await vscode.window.showInformationMessage(
+                'No newer project version found online.', 
+                { modal: true }
+            );
+        }
         return;
     }
 
@@ -338,6 +371,22 @@ async function updateProject() {
         await removeFile(dir, filename);
     }
     vscode.window.showInformationMessage(`Project updated to Version: ${onlineProject.version}`);
+}
+
+function getCurrentProject()
+{
+    let currentProject: { version: string, updatePackage: string } = { version: '1.0.0', updatePackage: updateLocation };
+    try {
+        currentProject = getFile(['.vscode', 'project.json'], returnedContent.parsedJson);
+    } catch {}
+    if (currentProject.version === '1.0.0') {
+        try {
+            const firstMesonLine = getFile(['.vscode', 'meson.js'], returnedContent.firstLine);
+            currentProject.version = firstMesonLine.match(/"([^"]+)"/)[1]; // Find the first match of the text inside double quotes in the string
+        }
+        catch{}
+    }
+    return currentProject;
 }
 
 function versionCompare(versionIn: string, versionMinimum: string): 'l' | 'h' | 'e' {
@@ -566,7 +615,7 @@ function checkSetup(): {status: string, message: string, basePath: string} {
     if (!fs.existsSync(path.join(buildDir, "build.ninja"))) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder", 'basePath': basePath }; }
     if (!fs.existsSync(path.join(buildDir, "compile_commands.json"))) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder", 'basePath': basePath }; }
     try{
-        const mesonInfo = getJSON(['build', 'meson-info', 'meson-info.json']);
+        const mesonInfo = getFile(['build', 'meson-info', 'meson-info.json'], returnedContent.parsedJson);
         const source = mesonInfo.directories.source;
         let resPath1 = '1'; 
         let resPath2 = '2';

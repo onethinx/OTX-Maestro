@@ -1,5 +1,9 @@
 # Change Log
 
+### 1.0.4
+
+- Various fixes (version updating, project check etc.)
+
 ### 1.0.3
 
 - Standalone extension
