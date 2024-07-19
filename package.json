@@ -53,6 +53,11 @@
           "type": "string",
           "default": "",
           "description": "Default debugger"
+        },
+        "otx-maestro.alwaysActivate": {
+          "type": "boolean",
+          "default": false,
+          "description": "Always activate extension (can be helpful for showing task buttons)"
         }
       }
     },

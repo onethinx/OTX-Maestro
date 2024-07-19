@@ -166,3 +166,18 @@ export function substituteVariableRecursive(arg: any): any {
 
   return arg;
 }
+
+export function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+export function getDate(): string {
+  const dateTime = new Date();
+  const year = dateTime.getFullYear();
+  const month = ("0" + (dateTime.getMonth() + 1)).slice(-2);
+  const day = ("0" + dateTime.getDate()).slice(-2);
+  const hour = ("0" + dateTime.getHours()).slice(-2);
+  const minute = ("0" + dateTime.getMinutes()).slice(-2);
+  const seconds = ("0" + dateTime.getSeconds()).slice(-2);
+  return `${year}-${month}-${day}_${hour}-${minute}-${seconds}`;
+}

@@ -1,12 +1,13 @@
 
 
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import { promises as fsp } from 'fs';
+////import * as fs from 'fs';
+//import { promises as fsp } from 'fs';
 import * as path from 'path';
-import * as https from 'https';
+//import * as https from 'https';
 import { execSync } from 'child_process';
-import { substituteVariables, substituteVariableRecursive } from './utils';
+import * as util from './utils';
+import * as io from './fileio';
 
 // The minimum project version
 let thisVersion = '1.0.0';
@@ -14,22 +15,21 @@ const minToolsVersion = '1.0.2';
 let maestroToolsVersion = '1.0.0';
 const updateLocation = 'https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/update.json';
 
-const defaultSettings: { [key: string]: string } = {
-    defaultDebugger: '',
-   //' someOtherSetting: '',
-};
-
 let notJlink = true;
 
-const config = vscode.workspace.getConfiguration('otx-maestro');
+const defaultSettings: { [key: string]: string | boolean } = {
+    defaultDebugger: '',
+    alwaysActivate: false
+};
 
-function getSetting(setting: string): string {
+function getSetting(setting: string): string | boolean {
     const config = vscode.workspace.getConfiguration('otx-maestro');
-    return (config.get<string>(setting) || defaultSettings[setting]) ?? '';
+    const value = config.get<string | boolean>(setting);
+    return value !== undefined ? value : defaultSettings[setting];
 }
 
 function evaluateTemplate(val: any) {
-    try{
+    try {
         const match = val.match(/\$\{(\w+)\}/);
         return match ? eval(match[1]) : val;
     }
@@ -37,12 +37,12 @@ function evaluateTemplate(val: any) {
     return val;
 }
 
-export function activate2(context: vscode.ExtensionContext) {
-}
+export async function activate(context: vscode.ExtensionContext) {
+    const currentProject = await getCurrentProject();
+    if (!getSetting('alwaysActivate') && currentProject.version === '1.0.0') { return; }      // Do not activate extension if project is not loaded
 
-export function activate(context: vscode.ExtensionContext) {
     thisVersion = context.extension.packageJSON.version;
-    notJlink = selectProg('', true).currentProgrammer !== 'jlink';
+    notJlink = (await selectProg('', true)).currentProgrammer !== 'jlink';
 
     const statusBarItem = vscode.window.createStatusBarItem();
     statusBarItem.text = `$(zap)OTX-Maestro$(zap)`;
@@ -53,14 +53,14 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(statusBarItem);
 
     context.subscriptions.push(vscode.commands.registerCommand('extension.showDetails', () => {
-        const currentProject = getCurrentProject();
-        let message = `OTX Maestro v${thisVersion}
-        OTX Maestro Tools v${maestroToolsVersion}
-        OTX Maestro Project v${currentProject.version}`;
+        let message = `--== OTX Maestro v${thisVersion} ==--\n\n`;
+        message += maestroToolsVersion !== '1.0.0'? `OTX Maestro Tools v${maestroToolsVersion}` : 'OTX Maestro Tools not installed!';
+        message += currentProject.version !== '1.0.0'? `\nOTX Maestro Project v${currentProject.version}`: '\nProject not loaded';
         
         const deprecatedExtensions = [
             //'ms-vscode.cpptools',
             'rolfnoot.cortex-meson-builder',
+            'onethinx.cortex-meson-builder',
             'marus25.cortex-debug',
             'egomobile.vscode-powertools',
             'actboy168.tasks'
@@ -77,9 +77,17 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage(message, { modal: true });
     }));
 
-
-
     updateProject(true) ;
+
+    // Define the commands array 
+    const commands = [
+        { command: 'otx-maestro.preLaunch',         callback: preLaunch },
+        { command: 'otx-maestro.updateProject',     callback: updateProject },
+        { command: 'otx-maestro.selectProgrammer',  callback: selectProgrammer },
+        { command: 'otx-maestro.clean',             callback: clean },
+        { command: 'otx-maestro.build',             callback: build },
+        { command: 'otx-maestro.launch',            callback: launch}
+    ];
 
     // Read task and add to taskbar if necessary 
     const tasksConfig = vscode.workspace.getConfiguration('tasks');
@@ -106,23 +114,13 @@ export function activate(context: vscode.ExtensionContext) {
         });
 
         context.subscriptions.push(vscode.commands.registerCommand('otx-maestro.runTask', async (task: any) => {
-            if (task.command === '${command:otx-maestro.clean}')
-            {
-                clean();
-            }
-            else if (task.command=== '${command:otx-maestro.build}')
-            {
-                build();
-            }
-            else if (task.command=== '${command:otx-maestro.launch}')
-            {
-                launch();
-            }
-            else if (task.command=== '${command:otx-maestro.prelaunch}')
-            {
-                preLaunch();
-            }
-            else {
+            // Extract the command name from the task command string
+            const commandName = task.command.replace('${command:', '').replace('}', '');
+            // Find the matching command in the commands array
+            const commandEntry = commands.find(cmd => cmd.command === commandName);
+            if (commandEntry && commandEntry.callback) {
+                commandEntry.callback();
+            } else {
                 vscode.tasks.executeTask(new vscode.Task(
                     { type: task.type, task: task.label },
                     vscode.TaskScope.Workspace,
@@ -133,16 +131,6 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }));
     }
-
-    // Define the commands array 
-    const commands = [
-        { command: 'otx-maestro.preLaunch',         callback: preLaunch },
-        { command: 'otx-maestro.updateProject',     callback: updateProject },
-        { command: 'otx-maestro.selectProgrammer',  callback: selectProgrammer },
-        { command: 'otx-maestro.clean',             callback: clean },
-        { command: 'otx-maestro.build',             callback: build },
-        { command: 'otx-maestro.launch',            callback: launch}
-    ];
 
     // Register the commands
     for (const { command, callback } of commands) {
@@ -172,14 +160,15 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
-// Command callback functions
+// ----- launch function ------------------------------------------------------------------------------------------------------------------------------------
+
 async function preLaunch() {
     const ret = await build();
     console.log(`prelaunch result" ${ret}`);
     if (ret === '') {
         (async () => {
             for (let cnt = 0; cnt < 10; cnt++) {
-                    await sleep(300);
+                    await util.sleep(300);
                     await vscode.commands.executeCommand('workbench.debug.action.focusRepl');
             }
         })();
@@ -187,127 +176,27 @@ async function preLaunch() {
     return ret;
 }
 
-
-function sleep(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function getDate(): string {
-    const dateTime = new Date();
-    const year = dateTime.getFullYear();
-    const month = ("0" + (dateTime.getMonth() + 1)).slice(-2);
-    const day = ("0" + dateTime.getDate()).slice(-2);
-    const hour = ("0" + dateTime.getHours()).slice(-2);
-    const minute = ("0" + dateTime.getMinutes()).slice(-2);
-    const seconds = ("0" + dateTime.getSeconds()).slice(-2);
-    return `${year}-${month}-${day}_${hour}-${minute}-${seconds}`;
-}
-
-
-function getFileFromUrl(url: string, destPath: string, firstLineOnly: boolean = false): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const options = {
-            headers: {
-                'Cache-Control': 'no-cache'
-            }
-        };
-
-        https.get(url, options, response => {
-            if (destPath) {
-                // Save the file to disk
-                const file = fs.createWriteStream(destPath);
-                response.pipe(file);
-                file.on('finish', () => {
-                    file.close(() => {
-                        resolve('');  // Resolve with an empty string when saving to disk
-                    });
-                }).on('error', err => {
-                    fs.unlink(destPath, () => {});  // Delete the file on error
-                    reject(err);  // Reject the promise with the error
-                });
-            } else {
-                // Collect the file content as a string, optionally returning only the first line
-                let data = '';
-                response.setEncoding('utf8');
-                response.on('data', chunk => {
-                    data += chunk;
-                    if (firstLineOnly) {
-                        const newlineIndex = data.indexOf('\n');
-                        if (newlineIndex !== -1) {
-                            resolve(data.slice(0, newlineIndex));
-                            response.destroy(); // Stop further data reception
-                        }
-                    }
-                });
-                response.on('end', () => {
-                    resolve(data);  // Resolve with the file content as a string
-                });
-                response.on('error', err => {
-                    reject(err);  // Reject the promise with the error
-                });
-            }
-        }).on('error', err => {
-            reject(err);  // Reject the promise with the error
-        });
-    });
-}
-
-async function updateFile(folder: string, file: string): Promise<void> {
-    const basePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-    if (!basePath) { throw new Error("Workspace folder is not defined."); };
-    const vsCodePath = path.join(basePath, folder, file);
-    const folderWithSlash = folder ? folder + '/' : '';
-    await getFileFromUrl(`https://raw.githubusercontent.com/onethinx/Maestro-lib/main/${folderWithSlash}${file}`, vsCodePath).catch(err => console.error('Error downloading file:', err));
-}
-
-async function removeFile(folder: string, file: string): Promise<void> {
-    try {
-        const basePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-        if (!basePath) { throw new Error("Workspace folder is not defined."); };
-        const vsCodePath = path.join(basePath, folder, file);
-        await fs.unlink(vsCodePath, () => {});
-        //console.log(`Successfully deleted ${vsCodePath}`);
-    } catch (error) {
-        console.error(`Error deleting file ${folder}/${file}:`, error);
-    }
-}
-
-enum returnedContent {
-    fullString,
-    firstLine,
-    parsedJson
-}
-
-function getFile(pathSegments: string[], content: returnedContent) {
-    const basePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-    if (!basePath) {
-        throw new Error("Workspace folder is not defined.");
-    }
-    const packageJsonPath = path.join(basePath, ...pathSegments);
-    const packageJsonContent = fs.readFileSync(packageJsonPath, 'utf8');
-
-    switch (content) {
-        case returnedContent.fullString:
-            return packageJsonContent;
-        case returnedContent.firstLine:
-            return packageJsonContent.split('\n')[0];
-        case returnedContent.parsedJson:
-            return JSON.parse(packageJsonContent);
-    }
-}
+// ----- update project function ------------------------------------------------------------------------------------------------------------------------------------
 
 async function updateProject(startup = false) {
-    let currentProject = getCurrentProject();
+    let currentProject = await getCurrentProject();
     let onlineProject = currentProject;
     let updatePackage;
+    let updateUrl = updateLocation;
+
     try {
-        const onlinePrjFile = await getFileFromUrl("https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/project.json", '', false);
-        onlineProject = JSON.parse(onlinePrjFile);
+        onlineProject = await io.getFile(["https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/project.json"], io.returnedContent.parsedJson);
+        //onlineProject = JSON.parse(onlinePrjFile);
         if (!currentProject.version || !onlineProject.version) { throw new Error(); };
     } catch (error) {
-        vscode.window.showErrorMessage(`Error fetching version: ${(error as Error).message || 'unknown error'}`);
+        if (!startup || currentProject.version !== '1.0.0')
+        {
+            vscode.window.showErrorMessage(`Error fetching version: ${(error as Error).message || 'unknown error'}`);
+        }
         return;
     }
+
+    if (startup && currentProject.version === '1.0.0') { return; }
     if (versionCompare(onlineProject.version, currentProject.version) !== 'h') {
         if (!startup)
         {
@@ -329,8 +218,8 @@ async function updateProject(startup = false) {
     if (result !== 'Yes') {return;}
 
     try {
-        const updatePackageFile = await getFileFromUrl(currentProject.updatePackage, '');
-        updatePackage = JSON.parse(updatePackageFile);
+        updateUrl = currentProject.updatePackage;
+        updatePackage = await io.getFile([updateUrl], io.returnedContent.parsedJson);
     }
     catch
     {
@@ -342,13 +231,16 @@ async function updateProject(startup = false) {
         try
         {
             try {
-                const updatePackageFile = await getFileFromUrl(updateLocation, '');
-                updatePackage = JSON.parse(updatePackageFile);
+                updateUrl = updateLocation;
+                updatePackage = await io.getFile([updateUrl], io.returnedContent.parsedJson);
+                //updatePackage = JSON.parse(updatePackageFile);
             }
             catch 
             {
-                const updatePackageFile = await getFileFromUrl(onlineProject.updatePackage, '');
-                updatePackage = JSON.parse(updatePackageFile);
+                updateUrl = onlineProject.updatePackage;
+                updatePackage = await io.getFile([updateUrl], io.returnedContent.parsedJson);
+                //const updatePackageFile = await getFileFromUrl(onlineProject.updatePackage, '');
+                //updatePackage = JSON.parse(updatePackageFile);
             }
         }
         catch
@@ -356,87 +248,82 @@ async function updateProject(startup = false) {
             vscode.window.showErrorMessage(`Invalid update link. Cannot update.`, { modal: true });
         }
     }
-    for (const file of updatePackage.updateFiles) {
-        let dir = path.dirname(file);
-        dir = dir === '.' ? '' : dir[0] === '.'? dir.substring(2) : dir;
-        const filename = path.basename(file);
-        console.log(`update: ${dir} ${filename}`);
-        await updateFile(dir, filename);
+
+    const secondLastSlashIndex = updateUrl.lastIndexOf('/', updateUrl.lastIndexOf('/') - 1);
+    const baseUrl = updateUrl.substring(0, secondLastSlashIndex + 1);
+    //const paths = currentProject.excludeFiles || [''];
+    const excludeFiles: string[] = (currentProject.excludeFiles || ['']).map(path => 
+        path.split(/[\/\\]/).filter((segment: string) => segment && segment !== '.').join('/') // Split by both forward slashes and backslashes Remove empty segments and single dots
+    );
+
+    let updateProjectJson = false;
+
+    try
+    {
+        for (const file of updatePackage.updateFiles) {
+            const currentFilePath = file.split(/[\/\\]/).filter((segment: string) => segment && segment !== '.');
+            const currentFile = currentFilePath.join('/');
+            if (excludeFiles.includes(currentFile)) { continue; }
+
+            console.log(`update: ${currentFile}`);
+            if (currentFile === '.vscode/project.json') {
+                updateProjectJson = true;
+                continue;
+            }
+            await io.copyFile([baseUrl].concat(currentFilePath), ['workspace'].concat(currentFilePath));
+        }
+        for (const file of updatePackage.removeFiles) {
+            const currentFilePath = file.split(/[\/\\]/).filter((segment: string) => segment && segment !== '.');
+            const currentFile = currentFilePath.join('/');
+            if (excludeFiles.includes(currentFile)) { continue; }
+
+            console.log(`remove: ${currentFile}`);
+            await io.removeFile(['workspace'].concat(currentFilePath));
+        }
+        if (!io.existsFile(['workspace', '.vscode', 'project.json'])) {
+            await io.copyFile([baseUrl, '.vscode', 'project.json'], ['workspace', '.vscode', 'project.json']);
+        }
+        else if (updateProjectJson) {
+            updateVersionInFile(['workspace', '.vscode', 'project.json'], onlineProject.version);
+        }
     }
-    for (const file of updatePackage.removeFiles) {
-        let dir = path.dirname(file);
-        dir = dir === '.' ? '' : dir[0] === '.'? dir.substring(2) : dir;
-        const filename = path.basename(file);
-        console.log(`remove: ${dir} ${filename}`);
-        await removeFile(dir, filename);
+    catch (err) {
+        vscode.window.showErrorMessage(`Error updating project: ${err}`);
+        return;
     }
     vscode.window.showInformationMessage(`Project updated to Version: ${onlineProject.version}`);
 }
 
-function getCurrentProject()
-{
-    let currentProject: { version: string, updatePackage: string } = { version: '1.0.0', updatePackage: updateLocation };
-    try {
-        currentProject = getFile(['.vscode', 'project.json'], returnedContent.parsedJson);
-    } catch {}
-    if (currentProject.version === '1.0.0') {
-        try {
-            const firstMesonLine = getFile(['.vscode', 'meson.js'], returnedContent.firstLine);
-            currentProject.version = firstMesonLine.match(/"([^"]+)"/)[1]; // Find the first match of the text inside double quotes in the string
-        }
-        catch{}
-    }
-    return currentProject;
-}
-
-function versionCompare(versionIn: string, versionMinimum: string): 'l' | 'h' | 'e' {
-    const vIn = String(versionIn).split('.').map(Number).reduce((acc, val) => acc * 1000 + val, 0);
-    const vRef = String(versionMinimum).split('.').map(Number).reduce((acc, val) => acc * 1000 + val, 0);
-    return vIn < vRef ? 'l' : vIn > vRef ? 'h' : 'e';
-}
-
-enum taskResult {
-    ok,
-    errorSilent,
-    errorInform,
-    errorConfirm
-}
-function taskStatus(message: string, succeeded: taskResult): string | null {
-    if (succeeded !== taskResult.ok && succeeded !== taskResult.errorSilent )
-    {
-        vscode.window.showErrorMessage(message, { modal: succeeded === taskResult.errorConfirm });
-    }
-    return succeeded === taskResult.ok? '' : null;
-}
+// ----- clean function ------------------------------------------------------------------------------------------------------------------------------------
 
 async function clean(): Promise<string | null>  {
 	diagnosticCollection.clear();
-    const setupResult = checkSetup();
+    const setupResult = await checkMesonSetup();
     if (setupResult.status === 'error') {
         const msg = `The Clean task terminated with exit status: ${setupResult.status}\r\n${setupResult.message}\r\nPlease Clean-Reconfigure.`;
         return taskStatus(msg, taskResult.errorConfirm);
     }
     
-    const buildFolder = path.join(setupResult.basePath, "build");
-    if (setupResult.status === 'missing') {await fs.promises.mkdir(buildFolder);}
+    const buildFolder = ['workspace', 'build'];
+    if (setupResult.status === 'missing') {await io.mkDir(buildFolder);}
     else {
-        const elfFiles = fs.readdirSync(buildFolder).filter(file => file.endsWith('.elf'));
+        const elfFiles = io.readDir(buildFolder).filter(file => file.endsWith('.elf'));
         const copy = elfFiles.length > 0;
-        const backupFolder = path.join(buildFolder, "backup");
-        const nowFolder = path.join(backupFolder, getDate());
-        if (!fs.existsSync(backupFolder)) {await fs.promises.mkdir(backupFolder);}
-        for (const file of fs.readdirSync(buildFolder))
+        const backupFolder = buildFolder.concat(['backup']);
+        const nowFolder = backupFolder.concat([util.getDate()]);
+        if (!io.existsFile(backupFolder)) {await io.mkDir(backupFolder);}
+        for (const file of io.readDir(buildFolder))
         {
-            const current = path.join(buildFolder, file);
-            if (copy && fs.statSync(current).isFile()) {
-                if (current.endsWith(".elf") || current.endsWith(".hex") || current.endsWith(".txt") || current.endsWith(".json")) {
-                    if (!fs.existsSync(nowFolder)) {await fs.promises.mkdir(nowFolder);}
-                    const destFile = path.join(nowFolder, file);
-                    await fs.promises.copyFile(current, destFile); 
+            const current = buildFolder.concat([file]);
+            if (copy && io.statSync(current).isFile()) {
+                if (file.endsWith(".elf") || file.endsWith(".hex") || file.endsWith(".txt") || file.endsWith(".json")) {
+                    if (!io.existsFile(nowFolder)) {await io.mkDir(nowFolder);}
+                    //const destFile = path.join(nowFolder, file);
+                    await io.copyFile(current, nowFolder.concat(['file'])); 
                 }
             } 
             if (file !== 'backup') {
-                fs.rmSync(current, { recursive: true, force: true });
+                io.rmSync(current);
             }
         };
     }
@@ -448,10 +335,10 @@ async function clean(): Promise<string | null>  {
         return taskStatus(msg, taskResult.errorInform);
     }
     
-    const crossBuildFile = path.join(setupResult.basePath, "cross_gcc.build");
-    await updateMeson(crossBuildFile, [], []);
-    const mesonBuildFile = path.join(setupResult.basePath, "meson.build");
-    await updateMeson(mesonBuildFile, [], []);
+    //const crossBuildFile = path.join(setupResult.basePath, "cross_gcc.build");
+    await updateMeson(['workspace', 'cross_gcc.build'], [], []);
+    //const mesonBuildFile = path.join(setupResult.basePath, "meson.build");
+    await updateMeson(['workspace', 'meson.build'], [], []);
 
     ret = await executeTask("Meson: configure");
     if (ret === null) { return taskStatus('Error Task Meson Configure', taskResult.errorInform); }
@@ -465,7 +352,7 @@ async function clean(): Promise<string | null>  {
         const msg = `The Configure task terminated with exit code: ${JSON.stringify(ret)}`;
         return taskStatus(msg, taskResult.errorInform);
     }
-    const selProgResult = selectProg("", true);
+    const selProgResult = await selectProg("", true);
     if (selProgResult.useDefault === true || selProgResult.currentProgrammer === "") {	// Current programmer is default or not set?
         var currentProgrammer = getSetting('defaultDebugger');
         //console.log(`default: ${currentProgrammer}`);
@@ -475,32 +362,34 @@ async function clean(): Promise<string | null>  {
         }
         else
         {	// Default set, select programmer
-            selectProg("default");
+            await selectProg("default");
         }
     }
     return taskStatus('', taskResult.ok);
 }
 
+// ----- build function ------------------------------------------------------------------------------------------------------------------------------------
+
 async function build(): Promise<string | null>  {
     diagnosticCollection.clear();
-    const setupResult = checkSetup();
+    const setupResult = await checkMesonSetup();
     if (setupResult.status !== 'ok') {
         const msg = `The Clean task terminated with exit status: ${setupResult.status}\r\n${setupResult.message}\r\nPlease Clean-Reconfigure.`;
         return taskStatus(msg, taskResult.errorConfirm);
     }
 
-    const sourcePath = path.join(setupResult.basePath, "source");
-    const mesonBuildFile = path.join(setupResult.basePath, "meson.build");
-    if (!fs.existsSync(mesonBuildFile)) {
+    //const sourcePath = path.join(setupResult.basePath, "source");
+    //const mesonBuildFile = path.join(setupResult.basePath, "meson.build");
+    if (!io.existsFile(['workspace', 'meson.build'])) {
         const msg = `meson.build file not found!`;
         return taskStatus(msg, taskResult.errorInform);
     }
 
-    const headerContents = readDirectory(setupResult.basePath, [], sourcePath, '.h', true);
-    const sourceContents = readDirectory(setupResult.basePath, [], sourcePath, '.c', false);
+    const headerContents = io.readDirectory(['workspace'], [], ['workspace', 'source'], '.h', true);
+    const sourceContents = io.readDirectory(['workspace'], [], ['workspace', 'source'], '.c', false);
     console.log(headerContents);
 
-    updateMeson(mesonBuildFile, headerContents, sourceContents);
+    updateMeson(['workspace', 'meson.build'], headerContents, sourceContents);
 
     const ret = await executeTask("Meson: build");
     if (ret === null) { return taskStatus("error meson build", taskResult.errorInform); }
@@ -516,6 +405,8 @@ async function build(): Promise<string | null>  {
     return taskStatus('', taskResult.ok);
 }
 
+// ----- launch function ------------------------------------------------------------------------------------------------------------------------------------
+
 async function launch(): Promise<string | null>  {
     // var ret = await vscode.commands.executeCommand('workbench.action.debug.run');
     // var ret = await vscode.commands.executeCommand('workbench.action.debug.selectandstart');
@@ -525,6 +416,7 @@ async function launch(): Promise<string | null>  {
     return taskStatus('', taskResult.ok);
 };
 
+// ----- select programmer function ------------------------------------------------------------------------------------------------------------------------------------
 
 async function selectProgrammer() {
     const programmers = [
@@ -557,7 +449,7 @@ async function selectProgrammer() {
     // Check for default programmer
     let currentProgrammer = getSetting('defaultDebugger');
     let useDefault = false;
-    if (currentProgrammer === '') { ( {useDefault, currentProgrammer} = selectProg("", true)); }
+    if (currentProgrammer === '') { ( {useDefault, currentProgrammer} = await selectProg("", true)); }
 
     const index = programmers.findIndex(prog => prog.s === currentProgrammer);
     console.log(`${currentProgrammer} - ${index}`);
@@ -584,7 +476,7 @@ async function selectProgrammer() {
             const programmer = programmers.find(prog => prog.l === selected.label);
             if (programmer)
             {
-                const currentProg = selectProg(programmer.s).currentProgrammer;
+                const currentProg = (await selectProg(programmer.s)).currentProgrammer;
                 const msg = (programmer.s === 'default')? `Default ('${currentProg}' in settings.json)` : selected.label;
                 vscode.window.showInformationMessage(`You selected: ${msg}`);
                 const isJlink = currentProg === 'jlink';
@@ -604,65 +496,113 @@ async function selectProgrammer() {
     });
 }
 
-function checkSetup(): {status: string, message: string, basePath: string} {
-    const basePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-    if (!basePath) { return { status: 'error', message: 'No workspace opened!', basePath: '' }; }
-    const buildDir = path.join(basePath, "build");
-    if (!fs.existsSync(buildDir)) { return { 'status': 'missing', 'message': "Missing Build Folder", 'basePath': basePath }; }
-    if (!fs.existsSync(path.join(buildDir, "meson-private"))) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder", 'basePath': basePath }; }
-    if (!fs.existsSync(path.join(buildDir, "meson-info"))) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder", 'basePath': basePath }; }
-    if (!fs.existsSync(path.join(buildDir, "meson-logs"))) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder", 'basePath': basePath }; }
-    if (!fs.existsSync(path.join(buildDir, "build.ninja"))) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder", 'basePath': basePath }; }
-    if (!fs.existsSync(path.join(buildDir, "compile_commands.json"))) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder", 'basePath': basePath }; }
+// ----- meson config functions ------------------------------------------------------------------------------------------------------------------------------------
+
+const diagnosticCollection = vscode.languages.createDiagnosticCollection('meson');
+
+async function checkMesonSetup(): Promise<{status: string, message: string}>  {
+    //const basePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+   // if (!basePath) { return { status: 'error', message: 'No workspace opened!', basePath: '' }; }
+    if (!io.existsFile(['workspace', 'build'])) { return { 'status': 'missing', 'message': "Missing Build Folder" }; }
+    if (!io.existsFile(['workspace', 'build', 'meson-private'])) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder" }; }
+    if (!io.existsFile(['workspace', 'build', 'meson-info'])) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder" }; }
+    if (!io.existsFile(['workspace', 'build', 'meson-logs'])) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder" }; }
+    if (!io.existsFile(['workspace', 'build', 'build.ninja'])) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder" }; }
+    if (!io.existsFile(['workspace', 'build', 'compile_commands.json'])) { return { 'status': 'unconfigured', 'message': "Unconfigured Build Folder" }; }
     try{
-        const mesonInfo = getFile(['build', 'meson-info', 'meson-info.json'], returnedContent.parsedJson);
+        const mesonInfo = await io.getFile(['workspace', 'build', 'meson-info', 'meson-info.json'], io.returnedContent.parsedJson);
         const source = mesonInfo.directories.source;
         let resPath1 = '1'; 
         let resPath2 = '2';
         try {
-            resPath1 = fs.realpathSync.native(mesonInfo.directories.source);
-            resPath2 = fs.realpathSync.native(basePath);
+            resPath1 = io.realpathSyncNative([mesonInfo.directories.source]);
+            resPath2 = io.realpathSyncNative(['workspace']);
         } catch  { }
-        console.log(`source ${resPath1} !== basePath ${resPath2}`);
-        if (resPath1 !== resPath2) { return { 'status': 'mismatch', 'message': "Path mismatch, probably some folders changed", 'basePath': basePath }; }
+        //console.log(`source ${resPath1} <=> basePath ${resPath2}`);
+        if (resPath1 !== resPath2) { return { 'status': 'mismatch', 'message': "Path mismatch, probably some folders changed" }; }
     }
     catch{};
-    return { 'status': 'ok', 'message': "OK", 'basePath': basePath };
+    return { 'status': 'ok', 'message': "OK" };
 }
 
-function updateMeson(mesonFile: string, headerContents: string[], sourceContents: string[]) {
-    const mesonContents = fs.readFileSync(mesonFile, 'utf-8');
+async function updateMeson(mesonFile: string[], headerContents: string[], sourceContents: string[]) {
+    //const mesonContents = fs.readFileSync(mesonFile, 'utf-8');
+    const mesonContents = await io.getFile(mesonFile, io.returnedContent.stringArray);
     let arr: string[] = [];
     let logOut = true;
     let linesStripped = 0;
 
-    mesonContents.split(/\r?\n/).forEach((line: string) => {
-            if (line.includes("OTX_Extension_HeaderFiles_End") || line.includes("OTX_Extension_SourceFiles_End")) { logOut = true; }
-            if (logOut) { arr.push(line); }
-            if (linesStripped > 0 && --linesStripped === 0) { logOut = true; }
-            if (line.includes("OTX_Extension_HeaderFiles_Start")) {
-                    arr = arr.concat(headerContents);
-                    logOut = false;
-            } else if (line.includes("OTX_Extension_SourceFiles_Start")) {
-                    arr = arr.concat(sourceContents);
-                    logOut = false;
-            } else if (line.includes("OTX_Extension_print")) {
-                    const regexp = /\(\s*(.*[^ ])[ )]+$/;
-                    const array = line.match(regexp);
-                    if (array !== null)
-                            { arr = arr.concat(substituteVariables(array[1])); }
-                    else
-                            { arr = arr.concat('Not found!'); }
-                    logOut = false;
-                    linesStripped = 1;
-            }
+    mesonContents.forEach((line: string) => {
+        if (line.includes("OTX_Extension_HeaderFiles_End") || line.includes("OTX_Extension_SourceFiles_End")) { logOut = true; }
+        if (logOut) { arr.push(line); }
+        if (linesStripped > 0 && --linesStripped === 0) { logOut = true; }
+        if (line.includes("OTX_Extension_HeaderFiles_Start")) {
+            arr = arr.concat(headerContents);
+            logOut = false;
+        } else if (line.includes("OTX_Extension_SourceFiles_Start")) {
+            arr = arr.concat(sourceContents);
+            logOut = false;
+        } else if (line.includes("OTX_Extension_print")) {
+            const regexp = /\(\s*(.*[^ ])[ )]+$/;
+            const array = line.match(regexp);
+            if (array !== null)
+                { arr = arr.concat(util.substituteVariables(array[1])); }
+            else
+                { arr = arr.concat('Not found!'); }
+            logOut = false;
+            linesStripped = 1;
+        }
     });
 
     const contents = arr.join('\n');
     // console.log(contents);
     if (contents === mesonContents) {return;}
-    writeFile(mesonFile, contents);
+    io.writeFile(mesonFile, contents);
 }
+
+async function parseMesonLog(): Promise<{ status: string, message: string, errorCount: number}>{
+    //const basePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+    //if (!basePath) { return { status: 'error', message: 'No workspace opened!', errorCount: 0 }; }
+    const logFilePath = ['workspace', 'build', 'meson-logs', 'meson-log.txt'];
+    if (!io.existsFile(logFilePath)) {
+        vscode.window.showErrorMessage("Meson log file not found.");
+        return { status: 'error', message: 'Meson log file not found.', errorCount: 0 };
+    }
+
+    const lines = await io.getFile(logFilePath, io.returnedContent.stringArray);
+    //const lines = logContent.split(/\r?\n/);
+    const diagnosticsMap: { [key: string]: vscode.Diagnostic[] } = {};
+    let errorCount = 0;
+
+    for (const line of lines) {
+        const wrnMatch = line.match(/^(.*?):(\d+):(\d+)?:?\s+WARNING:\s+(.+)$/);
+        const errMatch = line.match(/^(.*?):(\d+):(\d+)?:?\s+ERROR:\s+(.+)$/);
+        const match = errMatch? errMatch : wrnMatch;
+        if (match) {
+            const filePath = match[1].includes('meson.build') ? 'meson.build' : match[1];
+            let lineNumber = parseInt(match[2]) - 1; // Convert to zero-based index
+            let columnNumber = parseInt(match[3]) - 1; // Convert to zero-based index
+            const errorMessage = match[4];
+            if (lineNumber < 0 ) { lineNumber = 0; }
+            if (columnNumber < 0 ) { columnNumber = 0; }
+            const range = new vscode.Range(new vscode.Position(lineNumber, columnNumber), new vscode.Position(lineNumber, columnNumber + 1));
+            const diagnostic = new vscode.Diagnostic(range, errorMessage, errMatch? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning);
+
+            const absoluteFilePath = io.getPath(['workspace', filePath]);
+            if (!diagnosticsMap[absoluteFilePath]) {
+                diagnosticsMap[absoluteFilePath] = [];
+            }
+            diagnosticsMap[absoluteFilePath].push(diagnostic);
+            if (errMatch) { errorCount++; }
+        }
+    }
+    Object.keys(diagnosticsMap).forEach(fileUri => {
+        diagnosticCollection.set(vscode.Uri.file(fileUri), diagnosticsMap[fileUri]);
+    });
+    return { status: 'ok', message: 'OK', errorCount: errorCount };
+}
+
+// ----- task helper functions ------------------------------------------------------------------------------------------------------------------------------------
 
 async function getTask(taskName: string): Promise<vscode.Task | undefined> {   
     const tasks = await vscode.tasks.fetchTasks();
@@ -690,10 +630,32 @@ async function executeTask(taskName: string): Promise<number | undefined> {
     }
 }
 
+enum taskResult {
+    ok,
+    errorSilent,
+    errorInform,
+    errorConfirm
+}
+
+function taskStatus(message: string, succeeded: taskResult): string | null {
+    if (succeeded !== taskResult.ok && succeeded !== taskResult.errorSilent )
+    {
+        vscode.window.showErrorMessage(message, { modal: succeeded === taskResult.errorConfirm });
+    }
+    return succeeded === taskResult.ok? '' : null;
+}
+
+// ----- versioniong helper functions ------------------------------------------------------------------------------------------------------------------------------------
+
+function versionCompare(versionIn: string, versionMinimum: string): 'l' | 'h' | 'e' {
+    const vIn = String(versionIn).split('.').map(Number).reduce((acc, val) => acc * 1000 + val, 0);
+    const vRef = String(versionMinimum).split('.').map(Number).reduce((acc, val) => acc * 1000 + val, 0);
+    return vIn < vRef ? 'l' : vIn > vRef ? 'h' : 'e';
+}
 
 function checkToolsVersion(): string {
     try {
-        const versionGet = path.join(substituteVariables("${env:ONETHINX_PACK_LOC}"), 'bin', `OTX-Maestro-version ${thisVersion}`);
+        const versionGet = path.join(util.substituteVariables("${env:ONETHINX_PACK_LOC}"), 'bin', `OTX-Maestro-version ${thisVersion}`);
         const stdout = execSync(versionGet);
         return stdout.toString().trim();
     } catch (error) {
@@ -701,19 +663,62 @@ function checkToolsVersion(): string {
     }
 }
 
-function selectProg(programmer: string, checkOnly: boolean = false): {useDefault: boolean, currentProgrammer: string} {
+async function getCurrentProject()
+{
+    let currentProject: { version: string, updatePackage: string, excludeFiles: [string] | undefined } = { version: '1.0.0', updatePackage: updateLocation, excludeFiles: undefined };
+    try {
+        currentProject = await io.getFile(['workspace', '.vscode', 'project.json'], io.returnedContent.parsedJson);
+    } catch (err) {
+        console.log(`Error in file .vscode/project.json, loading defaults.\nError: ${err}`);
+    }
+    if (currentProject.version === '1.0.0') {
+        try {
+            let firstMesonLine = null;
+            try {
+                firstMesonLine = await io.getFile(['workspace', '.vscode', 'meson.js'], io.returnedContent.firstLine);
+            }
+            catch {}
+            try {
+                firstMesonLine = await io.getFile(['workspace', '.vscode', 'otxC.js'], io.returnedContent.firstLine);
+            }
+            catch {}
+            if (firstMesonLine !== null) { 
+                currentProject.version = '1.0.1';
+                currentProject.version = firstMesonLine.match(/"([^"]+)"/)[1]; // Find the first match of the text inside double quotes in the string
+            }
+        }
+        catch{}
+    }
+    return currentProject;
+}
+
+async function updateVersionInFile(file: string[], newVersion: string) {
+    const fileContent = await io.getFile(file, io.returnedContent.stringArray);
+    let newContent = [];
+    for (let line of fileContent) {
+        if (line.trim().startsWith('"version"')) {
+            line = `    "version": \"${newVersion}\",`;
+        }
+        newContent.push(line);
+    }
+    io.writeFile(file, newContent.join('\n'));
+}
+
+// ----- programmer selection functions ------------------------------------------------------------------------------------------------------------------------------------
+
+async function selectProg(programmer: string, checkOnly: boolean = false): Promise<{useDefault: boolean, currentProgrammer: string}> {
     // Substitute environment variables and get the base path
-    const basePath = substituteVariables('${env:ONETHINX_PACK_LOC}');
-    const sourceFile = path.join(basePath, 'config', 'scripts', 'brd.cfg');
+    const packFolder = util.substituteVariables('${env:ONETHINX_PACK_LOC}');
+    const sourceFile = [packFolder, 'config', 'scripts', 'brd.cfg'];
 
     // Get the workspace base path
-    const workspaceFolder = vscode.workspace.workspaceFolders ? vscode.workspace.workspaceFolders[0].uri.fsPath : '';
-    const boardSettingsFile = path.join(workspaceFolder, '.vscode', 'brd.cfg');
+    //const workspaceFolder = vscode.workspace.workspaceFolders ? vscode.workspace.workspaceFolders[0].uri.fsPath : '';
+    const boardSettingsFile = ['workspace', '.vscode', 'brd.cfg'];
 
     // Check if the file exists, if not, copy from the source
-    if (!fs.existsSync(boardSettingsFile)) {
+    if (!io.existsFile(boardSettingsFile)) {
         try {
-            fs.copyFileSync(sourceFile, boardSettingsFile);
+            io.copyFile(sourceFile, boardSettingsFile);
         } catch (err) {
             vscode.window.showErrorMessage(`File copy error: ${err instanceof Error ? err.message : 'Unknown error'}`);
             return {useDefault: false, currentProgrammer: ''};
@@ -721,7 +726,8 @@ function selectProg(programmer: string, checkOnly: boolean = false): {useDefault
     }
 
     // Read the board settings file content
-    const boardSettingsContent = fs.readFileSync(boardSettingsFile, 'utf-8');
+    //const boardSettingsContent = fs.readFileSync(boardSettingsFile, 'utf-8');
+    const boardSettingsContent = await io.getFile(boardSettingsFile, io.returnedContent.fullString);
     const lines = boardSettingsContent.split(/\r?\n/);
 
     // Match the PROGRAMMER and USE_DEFAULT settings
@@ -739,7 +745,7 @@ function selectProg(programmer: string, checkOnly: boolean = false): {useDefault
     // Determine if the new programmer is 'default'
     currentUseDefault = programmer === 'default';
     if (currentUseDefault) {
-        programmer = getSetting('defaultDebugger');
+        programmer = getSetting('defaultDebugger') as string;
         if (programmer === '') {
             vscode.window.showErrorMessage(
                 'No default programmer set! Please set the correct programmer in settings.json\nExample: "otx-maestro.defaultDebugger": "cmsis-dap"',
@@ -760,85 +766,8 @@ function selectProg(programmer: string, checkOnly: boolean = false): {useDefault
     const contents = lines.join('\n');
     if (contents === boardSettingsContent) {return {useDefault: currentUseDefault, currentProgrammer: programmer};}
 
-    writeFile(boardSettingsFile, contents);
+    io.writeFile(boardSettingsFile, contents);
 
     return {useDefault: currentUseDefault, currentProgrammer: programmer};
 }
 
-async function writeFile(fileName: string, contents: string): Promise<void> {
-    try {
-            await fsp.writeFile(fileName, contents, { encoding: 'utf-8' });
-        } catch (err) {
-            console.error('Error writing file:', err);
-            throw err;
-    }
-}
-
-function readDirectory(basePath: string, refArray: string[], dir: string, extension: string, foldersOnly: boolean): string[] {
-    let pushed = false;
-
-    fs.readdirSync(dir).forEach(file => {
-        const current = path.join(dir, file);
-
-        if (fs.statSync(current).isFile()) {
-            if (current.endsWith(extension)) {
-                const fle = path.relative(basePath, dir).replace(/\\/g, '/');
-
-                if (foldersOnly) {
-                    if (!pushed) {refArray.push(`\t'${fle}',`);}
-                    pushed = true;
-                } else {
-                    const fleFile = path.relative(basePath, current).replace(/\\/g, '/');
-                    refArray.push(`\t'${fleFile}',`);
-                }
-            }
-        } else {
-            readDirectory(basePath, refArray, current, extension, foldersOnly);
-        }
-    });
-    return refArray;
-}
-
-const diagnosticCollection = vscode.languages.createDiagnosticCollection('meson');
-
-function parseMesonLog(): { status: string, message: string, errorCount: number} {
-    const basePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-    if (!basePath) { return { status: 'error', message: 'No workspace opened!', errorCount: 0 }; }
-    const logFilePath = path.join(basePath, 'build', 'meson-logs', 'meson-log.txt');
-    if (!fs.existsSync(logFilePath)) {
-        vscode.window.showErrorMessage("Meson log file not found.");
-        return { status: 'error', message: 'Meson log file not found.', errorCount: 0 };
-    }
-
-    const logContent = fs.readFileSync(logFilePath, 'utf-8');
-    const lines = logContent.split(/\r?\n/);
-    const diagnosticsMap: { [key: string]: vscode.Diagnostic[] } = {};
-    let errorCount = 0;
-
-    lines.forEach(line => {
-        const wrnMatch = line.match(/^(.*?):(\d+):(\d+)?:?\s+WARNING:\s+(.+)$/);
-        const errMatch = line.match(/^(.*?):(\d+):(\d+)?:?\s+ERROR:\s+(.+)$/);
-        const match = errMatch? errMatch : wrnMatch;
-        if (match) {
-            const filePath = match[1].includes('meson.build') ? 'meson.build' : match[1];
-            let lineNumber = parseInt(match[2]) - 1; // Convert to zero-based index
-            let columnNumber = parseInt(match[3]) - 1; // Convert to zero-based index
-            const errorMessage = match[4];
-            if (lineNumber < 0 ) { lineNumber = 0; }
-            if (columnNumber < 0 ) { columnNumber = 0; }
-            const range = new vscode.Range(new vscode.Position(lineNumber, columnNumber), new vscode.Position(lineNumber, columnNumber + 1));
-            const diagnostic = new vscode.Diagnostic(range, errorMessage, errMatch? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning);
-
-            const absoluteFilePath = path.join(basePath, filePath);
-            if (!diagnosticsMap[absoluteFilePath]) {
-                diagnosticsMap[absoluteFilePath] = [];
-            }
-            diagnosticsMap[absoluteFilePath].push(diagnostic);
-            if (errMatch) { errorCount++; }
-        }
-    });
-    Object.keys(diagnosticsMap).forEach(fileUri => {
-        diagnosticCollection.set(vscode.Uri.file(fileUri), diagnosticsMap[fileUri]);
-    });
-    return { status: 'ok', message: 'OK', errorCount: errorCount };
-}
