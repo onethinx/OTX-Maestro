@@ -1,7 +1,7 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "Custom VS Code Tasks",
-    "description": "Schema for custom VS Code tasks with additional statusbar fields",
+    "description": "Schema for custom VS Code tasks with additional status bar fields",
     "type": "object",
     "properties": {
         "version": {
@@ -53,6 +53,15 @@
                                     "hide": {
                                         "type": "boolean",
                                         "description": "Hide status bar item"
+                                    },
+                                    "alignment": {
+                                        "type": "string",
+                                        "enum": ["left", "right"],
+                                        "description": "Alignment of the status bar item"
+                                    },
+                                    "priority": {
+                                        "type": "integer",
+                                        "description": "Priority of the status bar item, affecting its order"
                                     }
                                 },
                                 "additionalProperties": false

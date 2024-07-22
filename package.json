@@ -63,24 +63,28 @@
     },
     "commands": [
       {
+        "command": "otx-maestro.showInfo",
+        "title": "OTX-Maestro: Show OTX Maestro version info"
+      },
+      {
         "command": "otx-maestro.updateProject",
-        "title": "Update Project"
+        "title": "OTX-Maestro: Update Project"
       },
       {
         "command": "otx-maestro.selProg",
-        "title": "Select Programmer"
+        "title": "OTX-Maestro: Select Programmer"
       },
       {
         "command": "otx-maestro.clean",
-        "title": "Clean-Reconfigure"
+        "title": "OTX-Maestro: Clean-Reconfigure"
       },
       {
         "command": "otx-maestro.build",
-        "title": "Build"
+        "title": "OTX-Maestro: Build"
       },
       {
         "command": "otx-maestro.launch",
-        "title": "Build-and-Launch"
+        "title": "OTX-Maestro: Build-and-Launch"
       }
     ]
   },

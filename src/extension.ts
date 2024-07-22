@@ -11,9 +11,11 @@ import * as io from './fileio';
 
 // The minimum project version
 let thisVersion = '1.0.0';
-const minToolsVersion = '1.0.2';
+const minToolsVersion = '1.0.3';
 let maestroToolsVersion = '1.0.0';
 const updateLocation = 'https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/update.json';
+
+let currentProject: { version: string, updatePackage: string, excludeFiles: [string] | undefined } = { version: '1.0.0', updatePackage: updateLocation, excludeFiles: undefined };
 
 let notJlink = true;
 
@@ -28,13 +30,15 @@ function getSetting(setting: string): string | boolean {
     return value !== undefined ? value : defaultSettings[setting];
 }
 
-function evaluateTemplate(val: any) {
+function evaluateTemplate(val: string): string {
     try {
-        const match = val.match(/\$\{(\w+)\}/);
-        return match ? eval(match[1]) : val;
+        return val.replace(/\$\{(\w+)\}/g, (_, variable: string) => {
+            const evaluated = eval(variable);
+            return String(evaluated);
+        });
+    } catch (error) {
+        return JSON.stringify(val);
     }
-    catch{}
-    return val;
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -42,45 +46,14 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!getSetting('alwaysActivate') && currentProject.version === '1.0.0') { return; }      // Do not activate extension if project is not loaded
 
     thisVersion = context.extension.packageJSON.version;
-    notJlink = (await selectProg('', true)).currentProgrammer !== 'jlink';
-
-    const statusBarItem = vscode.window.createStatusBarItem();
-    statusBarItem.text = `$(zap)OTX-Maestro$(zap)`;
-    statusBarItem.tooltip = new vscode.MarkdownString(`OTX-Maestro v${thisVersion}\n\n[Learn More](https://github.com/onethinx/OTX-Maestro/blob/main/README.md)`);
-    statusBarItem.command = 'extension.showDetails';
-    statusBarItem.color = '#25C0D8';
-    statusBarItem.show();
-    context.subscriptions.push(statusBarItem);
-
-    context.subscriptions.push(vscode.commands.registerCommand('extension.showDetails', () => {
-        let message = `--== OTX Maestro v${thisVersion} ==--\n\n`;
-        message += maestroToolsVersion !== '1.0.0'? `OTX Maestro Tools v${maestroToolsVersion}` : 'OTX Maestro Tools not installed!';
-        message += currentProject.version !== '1.0.0'? `\nOTX Maestro Project v${currentProject.version}`: '\nProject not loaded';
-        
-        const deprecatedExtensions = [
-            //'ms-vscode.cpptools',
-            'rolfnoot.cortex-meson-builder',
-            'onethinx.cortex-meson-builder',
-            'marus25.cortex-debug',
-            'egomobile.vscode-powertools',
-            'actboy168.tasks'
-        ];
-        
-        const installedExtensions = vscode.extensions.all.map(ext => ext.id.toLowerCase());
-        const foundExtensions = deprecatedExtensions.filter(extId => installedExtensions.includes(extId));
-        
-        if (foundExtensions.length > 0)
-        {
-            message += `\n\nOTX-Maestro doesn't need these extensions anymore:\n${foundExtensions.join('\n')}`;
-        }
-        
-        vscode.window.showInformationMessage(message, { modal: true });
-    }));
-
-    updateProject(true) ;
+    try {
+        notJlink = (await selectProg('', true)).currentProgrammer !== 'jlink';
+    }
+    catch {}
 
     // Define the commands array 
     const commands = [
+        { command: 'otx-maestro.showInfo',          callback: showInfo },
         { command: 'otx-maestro.preLaunch',         callback: preLaunch },
         { command: 'otx-maestro.updateProject',     callback: updateProject },
         { command: 'otx-maestro.selectProgrammer',  callback: selectProgrammer },
@@ -89,6 +62,12 @@ export async function activate(context: vscode.ExtensionContext) {
         { command: 'otx-maestro.launch',            callback: launch}
     ];
 
+    // Register the commands
+    for (const { command, callback } of commands) {
+        const disposable = vscode.commands.registerCommand(command, callback);
+        context.subscriptions.push(disposable);
+    }
+
     // Read task and add to taskbar if necessary 
     const tasksConfig = vscode.workspace.getConfiguration('tasks');
     if (tasksConfig.tasks && Array.isArray(tasksConfig.tasks)) {
@@ -96,9 +75,10 @@ export async function activate(context: vscode.ExtensionContext) {
             //console.log('Task:', task); // Print each task to verify its structure
             const taskOptions = task.options || {};
             const itemHide = evaluateTemplate(taskOptions.statusbar?.hide);
+            const itemAlignment = taskOptions.statusbar?.alignment === 'right'? vscode.StatusBarAlignment.Right : vscode.StatusBarAlignment.Left;
             //const itemHide =taskOptions.statusbar?.hide;
-            if (itemHide === undefined || itemHide === false) {
-                const statusBarItem = vscode.window.createStatusBarItem();
+            if (itemHide === undefined || itemHide === 'false') {
+                const statusBarItem = vscode.window.createStatusBarItem(itemAlignment, taskOptions.statusbar?.priority);
                 statusBarItem.text =  (taskOptions.statusbar?.label ?? '' !== '')? taskOptions.statusbar.label : task.label;
                 
                 statusBarItem.command = {
@@ -107,7 +87,10 @@ export async function activate(context: vscode.ExtensionContext) {
                     arguments: [task],
                 };
                 if (taskOptions.statusbar?.color ?? '' !== '') { statusBarItem.color = taskOptions.statusbar.color; }
-                if (taskOptions.statusbar?.detail ?? '' !== '') { statusBarItem.tooltip = taskOptions.statusbar.detail; }
+                if (taskOptions.statusbar?.detail ?? '' !== '') { 
+                    const evaluatedText = evaluateTemplate(taskOptions.statusbar.detail);
+                    statusBarItem.tooltip = new vscode.MarkdownString(evaluatedText);
+                }
                 statusBarItem.show();
                 context.subscriptions.push(statusBarItem);
             }
@@ -132,15 +115,10 @@ export async function activate(context: vscode.ExtensionContext) {
         }));
     }
 
-    // Register the commands
-    for (const { command, callback } of commands) {
-        const disposable = vscode.commands.registerCommand(command, callback);
-        context.subscriptions.push(disposable);
-    }
-
+    // Refresh tasks if the tasks configuration has changed
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async (event) => {
         if (event.affectsConfiguration('tasks')) {
-            // Refresh tasks if the tasks configuration has changed
+            
             const confirm = await vscode.window.showInformationMessage(
                 'Tasks configuration changed. Do you want to reload the window to apply changes?', { modal: true }, 'Yes', 'No'
             );
@@ -149,18 +127,39 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         }
     }));
-
-    maestroToolsVersion = checkToolsVersion();
-    const compare = versionCompare(minToolsVersion, maestroToolsVersion);
-    if (compare === 'h') {
-        vscode.window.showErrorMessage(`Please update OTX Maestro Tools\nneeded: ${minToolsVersion}\n got: ${maestroToolsVersion}`, { modal: true });
-        return;
-    }
+    updateProject(true);
 }
 
 export function deactivate() {}
 
-// ----- launch function ------------------------------------------------------------------------------------------------------------------------------------
+// ----- showInfo function ------------------------------------------------------------------------------------------------------------------------------------
+
+async function showInfo() {
+    let message = `--== OTX Maestro v${thisVersion} ==--\n\n`;
+    message += maestroToolsVersion !== '1.0.0'? `OTX Maestro Tools v${maestroToolsVersion}` : 'OTX Maestro Tools not installed!';
+    message += currentProject.version !== '1.0.0'? `\nOTX Maestro Project v${currentProject.version}`: '\nProject not loaded';
+
+    const deprecatedExtensions = [
+        //'ms-vscode.cpptools',
+        'rolfnoot.cortex-meson-builder',
+        'onethinx.cortex-meson-builder',
+        'marus25.cortex-debug',
+        'egomobile.vscode-powertools',
+        'actboy168.tasks'
+    ];
+
+    const installedExtensions = vscode.extensions.all.map(ext => ext.id.toLowerCase());
+    const foundExtensions = deprecatedExtensions.filter(extId => installedExtensions.includes(extId));
+
+    if (foundExtensions.length > 0)
+    {
+        message += `\n\nOTX-Maestro doesn't need these extensions anymore:\n${foundExtensions.join('\n')}`;
+    }
+
+    vscode.window.showInformationMessage(message, { modal: true });
+}
+
+// ----- prelaunch function ------------------------------------------------------------------------------------------------------------------------------------
 
 async function preLaunch() {
     const ret = await build();
@@ -180,6 +179,15 @@ async function preLaunch() {
 
 async function updateProject(startup = false) {
     let currentProject = await getCurrentProject();
+    if (startup && currentProject.version === '1.0.0') { return; }    // Do not check / update if project is not loaded or too old at startup
+
+    maestroToolsVersion = checkToolsVersion();
+    const compare = versionCompare(minToolsVersion, maestroToolsVersion);
+    if (compare === 'h') {
+        vscode.window.showErrorMessage(`Please update OTX Maestro Tools${startup? '': ' first'}.\nNeeded: v${minToolsVersion} (got v${maestroToolsVersion})\nVisit https://github.com/onethinx/OTX-Maestro/releases`, { modal: !startup });
+        return;
+    }
+
     let onlineProject = currentProject;
     let updatePackage;
     let updateUrl = updateLocation;
@@ -189,28 +197,21 @@ async function updateProject(startup = false) {
         //onlineProject = JSON.parse(onlinePrjFile);
         if (!currentProject.version || !onlineProject.version) { throw new Error(); };
     } catch (error) {
-        if (!startup || currentProject.version !== '1.0.0')
-        {
-            vscode.window.showErrorMessage(`Error fetching version: ${(error as Error).message || 'unknown error'}`);
-        }
+        vscode.window.showErrorMessage(`Error fetching version: ${(error as Error).message || 'unknown error'}`);
         return;
     }
 
-    if (startup && currentProject.version === '1.0.0') { return; }
     if (versionCompare(onlineProject.version, currentProject.version) !== 'h') {
         if (!startup)
         {
-            await vscode.window.showInformationMessage(
-                'No newer project version found online.', 
-                { modal: true }
-            );
+            await vscode.window.showInformationMessage('No newer project version found online.', { modal: true });
         }
         return;
     }
 
     const result = await vscode.window.showInformationMessage(
         `Project update from ${currentProject.version} to ${onlineProject.version}.\n\n\
-        This might need an OTX-Meastro update and will update the meson build files and the configuration files in .vscode.\n\n\
+        This will update the meson build files and the configuration files in .vscode.\n\n\
         Backup your project if unsure.\n\nContinue?`, 
         { modal: true }, 
         'Yes', 'No'
@@ -665,7 +666,6 @@ function checkToolsVersion(): string {
 
 async function getCurrentProject()
 {
-    let currentProject: { version: string, updatePackage: string, excludeFiles: [string] | undefined } = { version: '1.0.0', updatePackage: updateLocation, excludeFiles: undefined };
     try {
         currentProject = await io.getFile(['workspace', '.vscode', 'project.json'], io.returnedContent.parsedJson);
     } catch (err) {
@@ -677,11 +677,12 @@ async function getCurrentProject()
             try {
                 firstMesonLine = await io.getFile(['workspace', '.vscode', 'meson.js'], io.returnedContent.firstLine);
             }
-            catch {}
-            try {
-                firstMesonLine = await io.getFile(['workspace', '.vscode', 'otxC.js'], io.returnedContent.firstLine);
+            catch {
+                try {
+                    firstMesonLine = await io.getFile(['workspace', '.vscode', 'otxC.js'], io.returnedContent.firstLine);
+                }
+                catch {}
             }
-            catch {}
             if (firstMesonLine !== null) { 
                 currentProject.version = '1.0.1';
                 currentProject.version = firstMesonLine.match(/"([^"]+)"/)[1]; // Find the first match of the text inside double quotes in the string
@@ -718,7 +719,7 @@ async function selectProg(programmer: string, checkOnly: boolean = false): Promi
     // Check if the file exists, if not, copy from the source
     if (!io.existsFile(boardSettingsFile)) {
         try {
-            io.copyFile(sourceFile, boardSettingsFile);
+            await io.copyFile(sourceFile, boardSettingsFile);
         } catch (err) {
             vscode.window.showErrorMessage(`File copy error: ${err instanceof Error ? err.message : 'Unknown error'}`);
             return {useDefault: false, currentProgrammer: ''};
