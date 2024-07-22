@@ -14,7 +14,7 @@ OTX Maestro is a Visual Studio Code extension designed to streamline the develop
 
 - Windows, macOS, or Linux
 - Visual Studio Code
-- [OTX Maestro Tools v1.0.2](https://github.com/onethinx/OTX-Maestro/releases)
+- [OTX Maestro Tools](https://github.com/onethinx/OTX-Maestro/releases)
 
 ## Known Issues
 
