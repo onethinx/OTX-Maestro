@@ -11,13 +11,15 @@ import * as io from './fileio';
 
 // The minimum project version
 let thisVersion = '1.0.0';
-const minToolsVersion = '1.0.3';
+const minToolsVersion = '1.0.4';
 let maestroToolsVersion = '1.0.0';
 const updateLocation = 'https://raw.githubusercontent.com/onethinx/Maestro-lib/main/.vscode/update.json';
 
 let currentProject: { version: string, updatePackage: string, excludeFiles: [string] | undefined } = { version: '1.0.0', updatePackage: updateLocation, excludeFiles: undefined };
 
 let notJlink = true;
+let creatorProjectChanged = false;
+let projectFileChanged = true;
 
 const defaultSettings: { [key: string]: string | boolean } = {
     defaultDebugger: '',
@@ -71,21 +73,42 @@ export async function activate(context: vscode.ExtensionContext) {
     // Read task and add to taskbar if necessary 
     const tasksConfig = vscode.workspace.getConfiguration('tasks');
     if (tasksConfig.tasks && Array.isArray(tasksConfig.tasks)) {
-        tasksConfig.tasks.forEach(task => {
+        for (const task of tasksConfig.tasks) {
             //console.log('Task:', task); // Print each task to verify its structure
             const taskOptions = task.options || {};
             const itemHide = evaluateTemplate(taskOptions.statusbar?.hide);
             const itemAlignment = taskOptions.statusbar?.alignment === 'right'? vscode.StatusBarAlignment.Right : vscode.StatusBarAlignment.Left;
-            //const itemHide =taskOptions.statusbar?.hide;
+
             if (itemHide === undefined || itemHide === 'false') {
                 const statusBarItem = vscode.window.createStatusBarItem(itemAlignment, taskOptions.statusbar?.priority);
                 statusBarItem.text =  (taskOptions.statusbar?.label ?? '' !== '')? taskOptions.statusbar.label : task.label;
                 
-                statusBarItem.command = {
-                    command: 'otx-maestro.runTask',
-                    title: task.label,
-                    arguments: [task],
+                // Register a new command for the statusbar click
+                const statusBarCommand: vscode.Command = {
+                    command : `otx-maestro.statusBarCommand.${task.label.replace(/\s+/g, '-')}`,
+                    title: task.label
                 };
+                //console.log('statusBarCommand:', statusBarCommand); 
+
+                // Extract the command name and check for a matching command in the commands array
+                const commandName = task.command.replace('${command:', '').replace('}', '');
+                const commandEntry = commands.find(cmd => cmd.command === commandName);
+                if (commandEntry) {
+                    vscode.commands.registerCommand(statusBarCommand.command, () => {
+                        commandEntry.callback();
+                    });
+                } else {
+                    const executeTask = await getTask([task.label]);
+                    if (executeTask !== undefined)
+                    {
+                        vscode.commands.registerCommand(statusBarCommand.command, async () => {
+                            console.log('Executing task:', task.label);
+                            await vscode.tasks.executeTask(executeTask);
+                        });
+                    }
+                }
+                statusBarItem.command = statusBarCommand;
+
                 if (taskOptions.statusbar?.color ?? '' !== '') { statusBarItem.color = taskOptions.statusbar.color; }
                 if (taskOptions.statusbar?.detail ?? '' !== '') { 
                     const evaluatedText = evaluateTemplate(taskOptions.statusbar.detail);
@@ -94,27 +117,9 @@ export async function activate(context: vscode.ExtensionContext) {
                 statusBarItem.show();
                 context.subscriptions.push(statusBarItem);
             }
-        });
-
-        context.subscriptions.push(vscode.commands.registerCommand('otx-maestro.runTask', async (task: any) => {
-            // Extract the command name from the task command string
-            const commandName = task.command.replace('${command:', '').replace('}', '');
-            // Find the matching command in the commands array
-            const commandEntry = commands.find(cmd => cmd.command === commandName);
-            if (commandEntry && commandEntry.callback) {
-                commandEntry.callback();
-            } else {
-                vscode.tasks.executeTask(new vscode.Task(
-                    { type: task.type, task: task.label },
-                    vscode.TaskScope.Workspace,
-                    task.label,
-                    'Workspace',
-                    new vscode.ShellExecution(task.command, task.args)
-                ));
-            }
-        }));
+        }
     }
-
+    activateWatcher(context);
     // Refresh tasks if the tasks configuration has changed
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async (event) => {
         if (event.affectsConfiguration('tasks')) {
@@ -128,6 +133,30 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     }));
     updateProject(true);
+}
+
+function activateWatcher(context: vscode.ExtensionContext) {
+    const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*');
+
+    fileWatcher.onDidChange((uri) => {
+        projectFileChanged = true;
+    });
+
+    fileWatcher.onDidCreate((uri) => {
+        if(uri.fsPath.includes('.cydsn')) { creatorProjectChanged = true; }
+        projectFileChanged = true;
+    });
+
+    fileWatcher.onDidDelete((uri) => {
+        if(uri.fsPath.includes('.cydsn')) { creatorProjectChanged = true; }
+        projectFileChanged = true;
+    });
+
+    vscode.workspace.onDidChangeTextDocument(event => {
+        projectFileChanged = true;
+    });
+
+    context.subscriptions.push(fileWatcher);
 }
 
 export function deactivate() {}
@@ -162,8 +191,11 @@ async function showInfo() {
 // ----- prelaunch function ------------------------------------------------------------------------------------------------------------------------------------
 
 async function preLaunch() {
-    const ret = await build();
-    console.log(`prelaunch result" ${ret}`);
+    let ret:string | null = '';
+    if (projectFileChanged) {
+        ret = await build();
+        console.log(`prelaunch result" ${ret}`);
+    }
     if (ret === '') {
         (async () => {
             for (let cnt = 0; cnt < 10; cnt++) {
@@ -261,6 +293,7 @@ async function updateProject(startup = false) {
 
     try
     {
+        io.removeFile(['workspace', 'build', 'build.ninja']);   // remove build file to have users reconficure the workspace after a project update
         for (const file of updatePackage.updateFiles) {
             const currentFilePath = file.split(/[\/\\]/).filter((segment: string) => segment && segment !== '.');
             const currentFile = currentFilePath.join('/');
@@ -320,7 +353,7 @@ async function clean(): Promise<string | null>  {
                 if (file.endsWith(".elf") || file.endsWith(".hex") || file.endsWith(".txt") || file.endsWith(".json")) {
                     if (!io.existsFile(nowFolder)) {await io.mkDir(nowFolder);}
                     //const destFile = path.join(nowFolder, file);
-                    await io.copyFile(current, nowFolder.concat(['file'])); 
+                    await io.copyFile(current, nowFolder.concat([file])); 
                 }
             } 
             if (file !== 'backup') {
@@ -329,7 +362,7 @@ async function clean(): Promise<string | null>  {
         };
     }
 
-    let ret = await executeTask("Creator: postbuild");
+    let ret = await executeTask(['Creator: postbuild']);
     //if (ret === undefined) { return taskStatus('Clean', false); }
     if (ret !== 0) {
         const msg = `The Creator Postbuild task terminated with exit code: ${JSON.stringify(ret)}`;
@@ -337,11 +370,11 @@ async function clean(): Promise<string | null>  {
     }
     
     //const crossBuildFile = path.join(setupResult.basePath, "cross_gcc.build");
-    await updateMeson(['workspace', 'cross_gcc.build'], [], []);
+    await updateBuildFile(['workspace', 'cross_gcc.build'], [], [], mapMeson);
     //const mesonBuildFile = path.join(setupResult.basePath, "meson.build");
-    await updateMeson(['workspace', 'meson.build'], [], []);
+    await updateBuildFile(['workspace', 'meson.build'], [], [], mapMeson);
 
-    ret = await executeTask("Meson: configure");
+    ret = await executeTask(['OTX: configure', 'Meson: configure']);
     if (ret === null) { return taskStatus('Error Task Meson Configure', taskResult.errorInform); }
     const mesonResult = await parseMesonLog();
     if (ret !== 0) 
@@ -366,12 +399,17 @@ async function clean(): Promise<string | null>  {
             await selectProg("default");
         }
     }
+    creatorProjectChanged = false;
     return taskStatus('', taskResult.ok);
 }
 
 // ----- build function ------------------------------------------------------------------------------------------------------------------------------------
 
 async function build(): Promise<string | null>  {
+    if (creatorProjectChanged) {
+        const msg = `The PSoC Creator project has been changed.\r\nPlease Clean-Reconfigure.`;
+        return taskStatus(msg, taskResult.errorConfirm);
+    }
     diagnosticCollection.clear();
     const setupResult = await checkMesonSetup();
     if (setupResult.status !== 'ok') {
@@ -381,28 +419,52 @@ async function build(): Promise<string | null>  {
 
     //const sourcePath = path.join(setupResult.basePath, "source");
     //const mesonBuildFile = path.join(setupResult.basePath, "meson.build");
-    if (!io.existsFile(['workspace', 'meson.build'])) {
-        const msg = `meson.build file not found!`;
+    let mesonBuildFile;
+    let cmakeBuildFile;
+    let maestroHeaderFile;
+    if (io.existsFile(['workspace', 'meson.build'])) { mesonBuildFile = ['workspace', 'meson.build']; }
+    if (io.existsFile(['workspace', 'CMakeLists.txt'])) { cmakeBuildFile = ['workspace', 'CMakeLists.txt']; }
+    if (io.existsFile(['workspace', 'source', 'maestro.h'])) { maestroHeaderFile = ['workspace', 'source', 'maestro.h']; }
+
+    if (mesonBuildFile === undefined && mesonBuildFile === undefined) {
+        const msg = `Build file not found!`;
         return taskStatus(msg, taskResult.errorInform);
     }
 
-    const headerContents = io.readDirectory(['workspace'], [], ['workspace', 'source'], '.h', true);
-    const sourceContents = io.readDirectory(['workspace'], [], ['workspace', 'source'], '.c', false);
-    console.log(headerContents);
+    let headerContents, sourceContents;
+    try {
+        headerContents = io.readDirectory(['workspace'], [], ['workspace', 'source'], '.h', true);
+        sourceContents = io.readDirectory(['workspace'], [], ['workspace', 'source'], '.c', false);
+    }
+    catch (err) {
+        return taskStatus(`Reading source folders error: ${err}`, taskResult.errorInform);
+    }
+    //console.log(headerContents);
 
-    updateMeson(['workspace', 'meson.build'], headerContents, sourceContents);
+    if (maestroHeaderFile !== undefined) {
+        await updateMaestro(maestroHeaderFile);
+    }
 
-    const ret = await executeTask("Meson: build");
-    if (ret === null) { return taskStatus("error meson build", taskResult.errorInform); }
+    if (mesonBuildFile !== undefined) {
+        await updateBuildFile(mesonBuildFile, headerContents, sourceContents, mapMeson);
+    }
+
+    if (cmakeBuildFile !== undefined) {
+        await updateBuildFile(mesonBuildFile, headerContents, sourceContents, mapCMake);
+    }
+
+    //const ret = await executeTask("Meson: build");
+    const ret = await executeTask(['OTX: build', 'Meson: build']);
+    creatorProjectChanged = false;
+    if (ret === null) { return taskStatus("Error task OTX build", taskResult.errorInform); }
     const mesonResult = await parseMesonLog();
     if (ret !== 0) 
     {
-        //vscode.window.showErrorMessage(`The Build task terminated with exit code: ${JSON.stringify(ret)}`);
-       // if (mesonResult.errorCount > 0) {
         vscode.commands.executeCommand('workbench.action.problems.focus');
         const msg = `The Build task terminated with exit code: ${JSON.stringify(ret)}`;
         return taskStatus(msg, taskResult.errorInform);
     }
+    projectFileChanged = false;
     return taskStatus('', taskResult.ok);
 }
 
@@ -526,9 +588,12 @@ async function checkMesonSetup(): Promise<{status: string, message: string}>  {
     return { 'status': 'ok', 'message': "OK" };
 }
 
-async function updateMeson(mesonFile: string[], headerContents: string[], sourceContents: string[]) {
-    //const mesonContents = fs.readFileSync(mesonFile, 'utf-8');
-    const mesonContents = await io.getFile(mesonFile, io.returnedContent.stringArray);
+const mapMeson = (line: string) => `\t'${line}',`;
+const mapCMake = (line: string) => `\t${line}`;
+
+async function updateBuildFile(buildFile: string[], headerContents: string[], sourceContents: string[], lineMapping: (line: string) => string) {
+    //const mesonContents = fs.readFileSync(buildFile, 'utf-8');
+    const mesonContents = await io.getFile(buildFile, io.returnedContent.stringArray);
     let arr: string[] = [];
     let logOut = true;
     let linesStripped = 0;
@@ -538,10 +603,24 @@ async function updateMeson(mesonFile: string[], headerContents: string[], source
         if (logOut) { arr.push(line); }
         if (linesStripped > 0 && --linesStripped === 0) { logOut = true; }
         if (line.includes("OTX_Extension_HeaderFiles_Start")) {
-            arr = arr.concat(headerContents);
+            const match = /\(folder:(.*?)\)/.exec(line);
+            if (match) {
+                const filteredContents = headerContents.filter(header => header.startsWith(match[1]));
+                arr = arr.concat(filteredContents.map(lineMapping));
+            }
+            else {
+                arr = arr.concat(headerContents.map(lineMapping));
+            }
             logOut = false;
         } else if (line.includes("OTX_Extension_SourceFiles_Start")) {
-            arr = arr.concat(sourceContents);
+            const match = /\(folder:(.*?)\)/.exec(line);
+            if (match) {
+                const filteredContents = sourceContents.filter(source => source.startsWith(match[1]));
+                arr = arr.concat(filteredContents.map(lineMapping));
+            }
+            else {
+                arr = arr.concat(sourceContents.map(lineMapping));
+            }
             logOut = false;
         } else if (line.includes("OTX_Extension_print")) {
             const regexp = /\(\s*(.*[^ ])[ )]+$/;
@@ -558,7 +637,7 @@ async function updateMeson(mesonFile: string[], headerContents: string[], source
     const contents = arr.join('\n');
     // console.log(contents);
     if (contents === mesonContents) {return;}
-    io.writeFile(mesonFile, contents);
+    io.writeFile(buildFile, contents);
 }
 
 async function parseMesonLog(): Promise<{ status: string, message: string, errorCount: number}>{
@@ -603,9 +682,57 @@ async function parseMesonLog(): Promise<{ status: string, message: string, error
     return { status: 'ok', message: 'OK', errorCount: errorCount };
 }
 
+// ----- parse Maestro header file ------------------------------------------------------------------------------------------------------------------------------------
+
+async function updateMaestro(maestroFile: string[]) {
+    const maestroContents = await io.getFile(maestroFile, io.returnedContent.stringArray);
+    let arr: string[] = [];
+    let logOut = true;
+    let linesStripped = 0;
+
+    maestroContents.forEach((line: string, index: number) => {
+        if (logOut) { arr.push(line); }
+        if (linesStripped > 0 && --linesStripped === 0) { logOut = true; }
+        if (line.includes("OTX_Extension_print") || line.includes("OTX_Extension_eval")) {
+            const regexp = /\(\s*(.*[^ ])[ )]+$/;
+            const array = line.match(regexp);
+            if (array !== null) {
+                try {
+                    if (array[1].includes('${nextLineValue}')) {
+                        // Ensure the next line exists
+                        const nextLine = maestroContents[index + 1];
+                        if (nextLine) {
+                            // Extract the first occurrence of one or more whitespaces followed by a number
+                            const numberMatch = nextLine.match(/\s+(\d+)/);
+                            if (numberMatch) {
+                                array[1] = array[1].replace('${nextLineValue}', numberMatch[1]) ;//= numberMatch[1]; // Extract the number
+                            } 
+                        } 
+                    }
+                    let val = util.substituteVariables(array[1]);
+                    if (line.includes("OTX_Extension_eval")) { val = eval(val); }
+                    arr = arr.concat(val);
+                }
+                catch (err) {
+                    arr = arr.concat(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                }
+            }
+            else { 
+                arr = arr.concat('Not found!');
+            }
+            logOut = false;
+            linesStripped = 1;
+        }
+    });
+
+    const contents = arr.join('\n');
+    // console.log(contents);
+    if (contents === maestroContents) {return;}
+    io.writeFile(maestroFile, contents);
+}
 // ----- task helper functions ------------------------------------------------------------------------------------------------------------------------------------
 
-async function getTask(taskName: string): Promise<vscode.Task | undefined> {   
+async function getTask2(taskName: string): Promise<vscode.Task | undefined> {   
     const tasks = await vscode.tasks.fetchTasks();
     for (const task of tasks) {
         if (task.name === taskName) {
@@ -615,9 +742,20 @@ async function getTask(taskName: string): Promise<vscode.Task | undefined> {
     vscode.window.showErrorMessage(`Cannot find ${taskName} task.`);
 }
 
-async function executeTask(taskName: string): Promise<number | undefined> {   
-    const task = await getTask(taskName);
-    console.log(`--- execute task: ${taskName}`);
+async function getTask(taskNames: string[]): Promise<vscode.Task | undefined> {
+    const tasks = await vscode.tasks.fetchTasks();
+    for (const taskName of taskNames) {
+        const task = tasks.find(t => t.name === taskName);
+        if (task) { return task; }
+    }
+    vscode.window.showErrorMessage(`Cannot find any of the specified tasks: ${taskNames.join(', ')}`);
+    return undefined;
+}
+
+async function executeTask(taskNames: string[]): Promise<number | undefined> {   
+    const task = await getTask(taskNames);
+    if (task === undefined) { return; }
+    console.log(`--- execute task: ${task.name}`);
     if (task) {
         const taskExecution = await vscode.tasks.executeTask(task);
         return new Promise<number | undefined>((resolve) => {
@@ -710,7 +848,7 @@ async function updateVersionInFile(file: string[], newVersion: string) {
 async function selectProg(programmer: string, checkOnly: boolean = false): Promise<{useDefault: boolean, currentProgrammer: string}> {
     // Substitute environment variables and get the base path
     const packFolder = util.substituteVariables('${env:ONETHINX_PACK_LOC}');
-    const sourceFile = [packFolder, 'config', 'scripts', 'brd.cfg'];
+    
 
     // Get the workspace base path
     //const workspaceFolder = vscode.workspace.workspaceFolders ? vscode.workspace.workspaceFolders[0].uri.fsPath : '';
@@ -718,12 +856,14 @@ async function selectProg(programmer: string, checkOnly: boolean = false): Promi
 
     // Check if the file exists, if not, copy from the source
     if (!io.existsFile(boardSettingsFile)) {
-        try {
-            await io.copyFile(sourceFile, boardSettingsFile);
-        } catch (err) {
-            vscode.window.showErrorMessage(`File copy error: ${err instanceof Error ? err.message : 'Unknown error'}`);
-            return {useDefault: false, currentProgrammer: ''};
-        }
+        vscode.window.showErrorMessage(`.vscode/brd.cfg is missing.\nPlease update project.`, { modal: true });
+        // try {
+        //     const sourceFile = [packFolder, 'config', 'scripts', 'brd.cfg'];
+        //     await io.copyFile(sourceFile, boardSettingsFile);
+        // } catch (err) {
+        //     vscode.window.showErrorMessage(`File copy error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        //     return {useDefault: false, currentProgrammer: ''};
+        // }
     }
 
     // Read the board settings file content

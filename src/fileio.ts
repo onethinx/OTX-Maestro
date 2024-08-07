@@ -54,11 +54,11 @@ function readDirectory_(basePath: string, refArray: string[], dir: string, exten
                 const fle = path.relative(basePath, dir).replace(/\\/g, '/');
 
                 if (foldersOnly) {
-                    if (!pushed) {refArray.push(`\t'${fle}',`);}
+                    if (!pushed) {refArray.push(fle);}
                     pushed = true;
                 } else {
                     const fleFile = path.relative(basePath, current).replace(/\\/g, '/');
-                    refArray.push(`\t'${fleFile}',`);
+                    refArray.push(fleFile);
                 }
             }
         } else {

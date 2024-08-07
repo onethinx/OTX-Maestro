@@ -2,7 +2,7 @@
   "name": "otx-maestro",
   "displayName": "OTX Maestro",
   "description": "A VS Code extension to support the Onethinx Core Module.",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "publisher": "Onethinx",
   "repository": {
     "type": "git",
