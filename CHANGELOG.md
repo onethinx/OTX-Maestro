@@ -1,5 +1,9 @@
 # Change Log
 
+### 1.0.7
+
+- Implemented autodetection of PSoC Creator (.cydsn) folder (needs project version >= 1.0.5)
+
 ### 1.0.6
 
 - Fixed issue where tasks didn't execute as provided

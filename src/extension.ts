@@ -20,6 +20,7 @@ let currentProject: { version: string, updatePackage: string, excludeFiles: [str
 let notJlink = true;
 let creatorProjectChanged = false;
 let projectFileChanged = true;
+let psocCreatorFolder = 'PSoC_Creator.cydsn';
 
 const defaultSettings: { [key: string]: string | boolean } = {
     defaultDebugger: '',
@@ -55,13 +56,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Define the commands array 
     const commands = [
-        { command: 'otx-maestro.showInfo',          callback: showInfo },
-        { command: 'otx-maestro.preLaunch',         callback: preLaunch },
-        { command: 'otx-maestro.updateProject',     callback: updateProject },
-        { command: 'otx-maestro.selectProgrammer',  callback: selectProgrammer },
-        { command: 'otx-maestro.clean',             callback: clean },
-        { command: 'otx-maestro.build',             callback: build },
-        { command: 'otx-maestro.launch',            callback: launch}
+        { command: 'otx-maestro.getPSoCCreatorFolder',      callback: getPSoCCreatorFolder },
+        { command: 'otx-maestro.showInfo',                  callback: showInfo },
+        { command: 'otx-maestro.preLaunch',                 callback: preLaunch },
+        { command: 'otx-maestro.updateProject',             callback: updateProject },
+        { command: 'otx-maestro.selectProgrammer',          callback: selectProgrammer },
+        { command: 'otx-maestro.clean',                     callback: clean },
+        { command: 'otx-maestro.build',                     callback: build },
+        { command: 'otx-maestro.launch',                    callback: launch}
     ];
 
     // Register the commands
@@ -186,6 +188,12 @@ async function showInfo() {
     }
 
     vscode.window.showInformationMessage(message, { modal: true });
+}
+
+// ----- getPSoCCreatorFolder function ------------------------------------------------------------------------------------------------------------------------------------
+
+async function getPSoCCreatorFolder() {
+    return psocCreatorFolder;
 }
 
 // ----- prelaunch function ------------------------------------------------------------------------------------------------------------------------------------
@@ -362,16 +370,24 @@ async function clean(): Promise<string | null>  {
         };
     }
 
+    const creatorFolders = io.readDir(['workspace']).filter(file => file.endsWith('.cydsn'));
+    if (creatorFolders.length === 0) {
+        const msg = `Error: No .cydsn folder found inside the workspace!`;
+        return taskStatus(msg, taskResult.errorConfirm);
+    }
+    if (creatorFolders.length > 1) {
+        vscode.window.showInformationMessage(`Detected multiple .cydsn folders! Using first found: ${creatorFolders[0]}`);
+    }
+    psocCreatorFolder = creatorFolders[0];
+
     let ret = await executeTask(['Creator: postbuild']);
     //if (ret === undefined) { return taskStatus('Clean', false); }
     if (ret !== 0) {
         const msg = `The Creator Postbuild task terminated with exit code: ${JSON.stringify(ret)}`;
         return taskStatus(msg, taskResult.errorInform);
     }
-    
-    //const crossBuildFile = path.join(setupResult.basePath, "cross_gcc.build");
+
     await updateBuildFile(['workspace', 'cross_gcc.build'], [], [], mapMeson);
-    //const mesonBuildFile = path.join(setupResult.basePath, "meson.build");
     await updateBuildFile(['workspace', 'meson.build'], [], [], mapMeson);
 
     ret = await executeTask(['OTX: configure', 'Meson: configure']);
@@ -413,7 +429,7 @@ async function build(): Promise<string | null>  {
     diagnosticCollection.clear();
     const setupResult = await checkMesonSetup();
     if (setupResult.status !== 'ok') {
-        const msg = `The Clean task terminated with exit status: ${setupResult.status}\r\n${setupResult.message}\r\nPlease Clean-Reconfigure.`;
+        const msg = `The Build task terminated with exit status: ${setupResult.status}\r\n${setupResult.message}\r\nPlease Clean-Reconfigure.`;
         return taskStatus(msg, taskResult.errorConfirm);
     }
 
