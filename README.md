@@ -10,6 +10,17 @@ OTX Maestro is a Visual Studio Code extension designed to streamline the develop
 - **Enhanced User Experience**: Optimized interface and workflows to improve productivity and development experience.
 - **IntelliSense for C/C++**: Advanced code completion, linting, and syntax highlighting for C/C++ development.
 
+## Installation
+
+  - OTX Maestro Tools (all the tools in one bundle such as the ARM GCC Compiler, OpenOCD for programming / debugging etc.)
+    - [Download the latest OTX-Maestro Tools from here](https://github.com/onethinx/OTX-Maestro/releases) and install.<br><br>
+  - Install the OTX-Maestro extension
+    - Open the Extension view by clicking the Extensions icon or press `Shift + CTRL/Command + X`
+    ![](https://raw.githubusercontent.com/onethinx/Readme_assets/main/OTX_Maestro-install.png) <br><br>
+    - Type `otx` in the searchbar and find the `OTX Maestro` Extension pack
+    - Click `Install` and wait for the extension to get installed
+    - **Important**: Close VS Code before using to make sure the environment variables are loaded at starting VS Code (MAC users must fully quit VSCode, there shoud not be the white dot below the VSCode) <br><br>
+
 ## Requirements
 
 - Windows, macOS, or Linux
