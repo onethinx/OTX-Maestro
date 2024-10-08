@@ -26,23 +26,23 @@ Here’s an example of what a `maestro.h` file might look like when using **Code
 // OTX_Extension_print(#define ONETHINX_PACK_LOC = '${env:ONETHINX_PACK_LOC}')
 #define ONETHINX_PACK_LOC = '/Applications/OTX-Maestro'
 
-// OTX_Extension_eval("#define year " + new Date().getFullYear() % 100 )
-#define year 24
+// OTX_Extension_eval("#define buildyear " + new Date().getFullYear() % 100)
+#define buildyear 24
 
-// OTX_Extension_eval( "#define month " + ("0" + (new Date().getMonth()+1)).slice(-2) )
-#define month 07
+// OTX_Extension_eval("#define buildmonth " + (new Date().getMonth() + 1))
+#define buildmonth 10
 
-// OTX_Extension_eval( "#define day " + ("0" + new Date().getDate()).slice(-2) )
-#define day 30
+// OTX_Extension_eval("#define buildday " + new Date().getDate())
+#define buildday 8
 
-// OTX_Extension_eval( "#define hour " + ("0" + new Date().getHours()).slice(-2) )
-#define hour 16
+// OTX_Extension_eval("#define buildhour " + new Date().getHours())
+#define buildhour 22
 
-// OTX_Extension_eval( "#define minute " + ("0" + new Date().getMinutes()).slice(-2) )
-#define minute 06
+// OTX_Extension_eval("#define buildminute " + new Date().getMinutes())
+#define buildminute 35
 
-// OTX_Extension_eval( "#define second " + ("0" + new Date().getSeconds()).slice(-2) )
-#define second 13
+// OTX_Extension_eval("#define buildsecond " + new Date().getSeconds())
+#define buildsecond 57
 
 // OTX_Extension_eval( "#define buildNr " + (${nextLineValue}+1) )
 #define buildNr 52
