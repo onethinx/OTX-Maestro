@@ -9,6 +9,7 @@ OTX Maestro is a Visual Studio Code extension designed to streamline the develop
 - **Fully Integrated with VS Code**: Seamless integration with the Visual Studio Code environment, leveraging its tools and extensions.
 - **Enhanced User Experience**: Optimized interface and workflows to improve productivity and development experience.
 - **IntelliSense for C/C++**: Advanced code completion, linting, and syntax highlighting for C/C++ development.
+- **CodeTagging**: [CodeTags](https://github.com/onethinx/OTX-Maestro/blob/main/CodeTags.md) parses the `maestro.h` header file to dynamically inject dates, build versions, and custom variables into your code.
 
 ## Installation
 
