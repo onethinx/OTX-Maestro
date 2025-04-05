@@ -1,5 +1,19 @@
 # Change Log
 
+## 1.1.0
+
+- Fixed project check at extension startup
+- Fixed global settings save
+
+### 1.0.9
+
+- Added ChirpStack provisioning for OTX-18 modules
+- Added Sidebar Icon and configurable buttons (via tasks.json)
+
+### 1.0.8
+
+- Minor fix for build file parsing issue when both CMakeLists.txt and meson.build are present
+
 ### 1.0.7
 
 - Implemented autodetection of PSoC Creator (.cydsn) folder (needs project version >= 1.0.5)

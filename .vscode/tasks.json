@@ -1,5 +1,3 @@
-// See https://go.microsoft.com/fwlink/?LinkId=733558
-// for the documentation about the tasks.json format
 {
 	"version": "2.0.0",
 	"tasks": [
@@ -15,6 +13,76 @@
 				"kind": "build",
 				"isDefault": true
 			}
-		}
+		},
+		{
+			"label": "vsce package",
+			"type": "shell",
+			"command": "vsce",
+			"args": ["package"],
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared"
+			},
+			"options": {
+				"statusbar": { 
+					"label": "$(notebook-render-output) Build Package",
+					"hide": false,
+					"alignment": "right",
+					"priority": 500
+				},
+				"sidebar": { 
+					"label": "Build Package",
+					"hide": false
+				}
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "vsce publish",
+			"type": "shell",
+			"command": "vsce",
+			"args": ["publish"],
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared"
+			},
+			"options": {
+				"statusbar": { 
+					"label": "$(notebook-render-output) Publish Package",
+					"hide": false,
+					"alignment": "right",
+					"priority": 500
+				},
+				"sidebar": { 
+					"label": "Publish Package",
+					"hide": false
+				}
+			},
+			"problemMatcher": []
+		},
+		{
+            "label": "Update PAT Onethinx",
+            "type": "shell",
+			"command": "vsce logout Onethinx && vsce login Onethinx",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+			"options": {
+				"statusbar": { 
+					"label": "$(notebook-render-output) Update PAT Onethinx",
+					"hide": false,
+					"alignment": "right",
+					"priority": 500
+				},
+				"sidebar": { 
+					"label": "Update PAT Onethinx",
+					"hide": false
+				}
+			},
+			"problemMatcher": []
+        }
 	]
 }

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { promises as fsp } from 'fs';
 import * as path from 'path';
+import * as http from 'http';
 import * as https from 'https';
 import { execSync } from 'child_process';
 import * as util from './utils';
@@ -36,6 +37,15 @@ export async function writeFile(pathSegments: string[], contents: string): Promi
         console.error('Error writing file:', err);
         throw err;
     }
+}
+
+export function existsExtension(pathSegments: string[], extension: string): boolean {
+    const basePath = getPath(pathSegments);
+    try {
+        const entries = fs.readdirSync(basePath, { withFileTypes: true });
+        return entries.some(entry => entry.isDirectory() && entry.name.endsWith(extension));
+    } catch (error) {}
+    return false;
 }
 
 export function readDirectory(basePath: string[], refArray: string[], dir: string[], extension: string, foldersOnly: boolean): string[] {
@@ -74,7 +84,7 @@ export async function getFile(pathSegments: string[], content: returnedContent) 
     if (pathSegments[0].toLowerCase().startsWith('http'))
     {
         const url = pathSegments.map(segment => segment.replace(/^\/+|\/+$/g, '')).filter(Boolean).join('/'); // Remove leading and trailing slashes, empty segments
-        fileContent = await getFileFromUrl(url);
+        fileContent = await sendHttpRequest(url);
     }
     else
     {
@@ -95,7 +105,123 @@ export async function getFile(pathSegments: string[], content: returnedContent) 
     }
 }
 
-function getFileFromUrl(url: string): Promise<string> {
+export function sendHttpRequest(
+  url: string,
+  method: string = 'GET',
+  additionalHeaders: { [key: string]: string } = {},
+  requestBody?: string
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // Determine whether to use HTTP or HTTPS based on the URL protocol.
+    const isHttps = url.startsWith('https://');
+    const lib = isHttps ? https : http;
+
+    // If a request body is provided and Content-Length isn't set, add it.
+    if (requestBody && !additionalHeaders['Content-Length']) {
+      additionalHeaders['Content-Length'] = Buffer.byteLength(requestBody).toString();
+    }
+
+    const options = {
+      method,
+      headers: {
+        'Cache-Control': 'no-cache',
+        ...additionalHeaders
+      }
+    };
+
+    const req = lib.request(url, options, response => {
+      const { statusCode } = response;
+
+      // Check for non-success status codes (outside the range 200-299)
+      if (!statusCode || statusCode < 200 || statusCode >= 300) {
+        reject(new Error(`Request failed with status code: ${statusCode}`));
+        response.resume(); // Consume response data to free up memory
+        return;
+      }
+
+      response.setEncoding('utf8'); // Ensure data is received as a string
+      let rawData = '';
+
+      // Accumulate the data chunks
+      response.on('data', chunk => {
+        rawData += chunk;
+      });
+
+      // Resolve the promise once the response ends
+      response.on('end', () => {
+        resolve(rawData);
+      });
+    });
+
+    req.on('error', err => {
+      // Handle request errors
+      reject(err);
+    });
+
+    // If a request body is provided, write it to the request.
+    if (requestBody) {
+      req.write(requestBody);
+    }
+
+    // End the request (for GET, this sends it immediately)
+    req.end();
+  });
+}
+
+export function getFileFromUrl_OLD2(
+    url: string, 
+    method: string = 'GET', 
+    additionalHeaders: { [key: string]: string } = {}
+): Promise<string> {
+    return new Promise((resolve, reject) => {
+        // Determine whether to use HTTP or HTTPS based on the URL protocol.
+        const isHttps = url.startsWith('https://');
+        const lib = isHttps ? https : http;
+
+        const options = {
+            method,
+            headers: {
+                'Cache-Control': 'no-cache',
+                ...additionalHeaders
+            }
+        };
+
+        const req = lib.request(url, options, response => {
+            const { statusCode } = response;
+
+            // Check for non-success status codes (outside the range 200-299)
+            if (!statusCode || statusCode < 200 || statusCode >= 300) {
+                reject(new Error(`Request failed with status code: ${statusCode}`));
+                response.resume(); // Consume the response data to free up memory
+                return;
+            }
+
+            response.setEncoding('utf8'); // Ensure the data is received as a string
+            let rawData = '';
+
+            // Accumulate the data chunks
+            response.on('data', chunk => {
+                rawData += chunk;
+            });
+
+            // Resolve the promise once the response ends
+            response.on('end', () => {
+                resolve(rawData);
+            });
+        });
+
+        req.on('error', err => {
+            // Handle request errors
+            reject(err);
+        });
+
+        // End the request (for GET, this sends it immediately)
+        req.end();
+    });
+}
+
+
+function getFileFromUrl_OLD(url: string): Promise<string> {
     return new Promise((resolve, reject) => {
         const options = {
             headers: {

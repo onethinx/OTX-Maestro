@@ -65,6 +65,32 @@
                                     }
                                 },
                                 "additionalProperties": false
+                            },
+                            "sidebar": {
+                                "type": "object",
+                                "properties": {
+                                    "label": {
+                                        "type": "string",
+                                        "description": "Label to display in the status bar"
+                                    },
+                                    "color": {
+                                        "type": "string",
+                                        "description": "Color of the status bar item"
+                                    },
+                                    "detail": {
+                                        "type": "string",
+                                        "description": "Detail description for the status bar item"
+                                    },
+                                    "hide": {
+                                        "type": "boolean",
+                                        "description": "Hide status bar item"
+                                    },
+                                    "spacer": {
+                                        "type": "boolean",
+                                        "description": "Add a spacer before the item"
+                                    }   
+                                },
+                                "additionalProperties": false
                             }
                         },
                         "additionalProperties": false

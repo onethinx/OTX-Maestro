@@ -2,7 +2,7 @@
   "name": "otx-maestro",
   "displayName": "OTX Maestro",
   "description": "A VS Code extension to support the Onethinx Core Module.",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "publisher": "Onethinx",
   "repository": {
     "type": "git",
@@ -28,23 +28,42 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.63.0",
     "@types/mocha": "^10.0.7",
     "@types/node": "20.x",
+    "@types/vscode": "^1.63.0",
     "@typescript-eslint/eslint-plugin": "^7.14.1",
     "@typescript-eslint/parser": "^7.11.0",
-    "eslint": "^8.57.0",
-    "typescript": "^5.4.5",
     "@vscode/test-cli": "^0.0.9",
-    "@vscode/test-electron": "^2.4.0"
+    "@vscode/test-electron": "^2.4.0",
+    "copyfiles": "^2.4.1",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.5"
   },
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "otx-maestro",
+          "title": "OTX Maestro",
+          "icon": "images/icon-sidebar.png"
+        }
+      ]
+    },
+    "views": {
+      "otx-maestro": [
+        {
+          "type": "webview",
+          "id": "otx-maestro.sidebar",
+          "name": "Settings"
+        }
+      ]
+    },
     "jsonValidation": [
       {
-          "fileMatch": ".vscode/tasks.json",
-          "url": "./src/tasks-schema.json"
+        "fileMatch": ".vscode/tasks.json",
+        "url": "./src/tasks-schema.json"
       }
-   ],
+    ],
     "configuration": {
       "type": "object",
       "title": "OTX Maestro Configuration",
@@ -85,6 +104,18 @@
       {
         "command": "otx-maestro.launch",
         "title": "OTX-Maestro: Build-and-Launch"
+      },
+      {
+        "command": "otx-maestro.check",
+        "title": "OTX-Maestro: Check OTX-18 info"
+      },
+      {
+        "command": "otx-maestro.configureProvisioning",
+        "title": "OTX-Maestro: Configure Provisioning"
+      },
+      {
+        "command": "otx-maestro.doProvisioning",
+        "title": "OTX-Maestro: Provision OTX-18"
       }
     ]
   },
@@ -101,5 +132,9 @@
     "ms-vscode.cpptools",
     "onethinx.cortex-gdb",
     "mrmomo.meson-build"
-  ]
+  ],
+  "dependencies": {
+    "@grpc/grpc-js": "^1.13.0",
+    "@grpc/proto-loader": "^0.7.13"
+  }
 }
