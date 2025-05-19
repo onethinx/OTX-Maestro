@@ -70,7 +70,7 @@ export async function activate(context: vscode.ExtensionContext) {
     if (currentProject.version !== '?')
     {
         try {
-            notJlink = (await selectProg('', true)).currentProgrammer !== 'jlink';
+            notJlink = (await selectProg('', true, true)).currentProgrammer !== 'jlink';
         }
         catch {}
     }
@@ -188,9 +188,9 @@ export async function activate(context: vscode.ExtensionContext) {
             spacer: true
         });
     }
-    else {
+   // else {
         if (currentProject.version !== '?') updateProject(true);
-    }
+   // }
 }
 
 function activateWatcher(context: vscode.ExtensionContext) {
@@ -1099,6 +1099,7 @@ async function preLaunch() {
     if (projectFileChanged) {
         ret = await build();
         console.log(`prelaunch result" ${ret}`);
+        if (ret === null) ret = "'\n\nResolve problems first";
     }
     if (ret === '') {
         (async () => {
@@ -1775,14 +1776,14 @@ async function updateVersionInFile(file: string[], newVersion: string) {
 
 // ----- programmer selection functions ------------------------------------------------------------------------------------------------------------------------------------
 
-async function selectProg(programmer: string, checkOnly: boolean = false): Promise<{useDefault: boolean, currentProgrammer: string}> {
+async function selectProg(programmer: string, checkOnly: boolean = false, noWarning: boolean = false): Promise<{useDefault: boolean, currentProgrammer: string}> {
     // Substitute environment variables and get the base path
     const packFolder = util.substituteVariables('${env:ONETHINX_PACK_LOC}');
     
     const boardSettingsFile = ['workspace', '.vscode', 'brd.cfg'];
 
     // Check if the file exists, if not, copy from the source
-    if (!io.existsFile(boardSettingsFile)) {
+    if (!noWarning && !io.existsFile(boardSettingsFile)) {
         vscode.window.showErrorMessage(`.vscode/brd.cfg is missing.\nPlease update project.`, { modal: true });
     }
 

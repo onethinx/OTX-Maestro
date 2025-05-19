@@ -2,7 +2,7 @@
   "name": "otx-maestro",
   "displayName": "OTX Maestro",
   "description": "A VS Code extension to support the Onethinx Core Module.",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "publisher": "Onethinx",
   "repository": {
     "type": "git",
@@ -54,14 +54,15 @@
         {
           "type": "webview",
           "id": "otx-maestro.sidebar",
-          "name": "Settings"
+          "name": "Settings",
+          "icon": "images/icon-sidebar.png"
         }
       ]
     },
     "jsonValidation": [
       {
         "fileMatch": ".vscode/tasks.json",
-        "url": "./src/tasks-schema.json"
+        "url": "./out/tasks-schema.json"
       }
     ],
     "configuration": {

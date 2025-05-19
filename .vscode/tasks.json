@@ -2,6 +2,7 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "NPM Watch",
 			"type": "npm",
 			"script": "watch",
 			"problemMatcher": "$tsc-watch",
@@ -15,8 +16,15 @@
 			}
 		},
 		{
+			"label": "Copy Tasks Schema",
+			"type": "shell",
+			"command": "cp \"${workspaceFolder}/src/tasks-schema.json\" \"${workspaceFolder}/out/tasks-schema.json\"",
+      		"problemMatcher": []
+		},
+		{
 			"label": "vsce package",
 			"type": "shell",
+			"dependsOn": "Copy Tasks Schema",
 			"command": "vsce",
 			"args": ["package"],
 			"group": "build",
@@ -41,6 +49,7 @@
 		{
 			"label": "vsce publish",
 			"type": "shell",
+			"dependsOn": "Copy Tasks Schema",
 			"command": "vsce",
 			"args": ["publish"],
 			"group": "build",

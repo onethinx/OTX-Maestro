@@ -1,5 +1,13 @@
 # Change Log
 
+## 1.1.2
+
+- Minor fix at project load where status / taskbar didn't load correctly
+
+## 1.1.1
+
+- Streamlined project updating
+
 ## 1.1.0
 
 - Fixed project check at extension startup
