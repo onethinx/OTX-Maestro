@@ -20,7 +20,7 @@ OTX Maestro is a Visual Studio Code extension designed to streamline the develop
     ![](https://raw.githubusercontent.com/onethinx/Readme_assets/main/OTX_Maestro-install.png) <br><br>
     - Type `otx` in the searchbar and find the `OTX Maestro` Extension pack
     - Click `Install` and wait for the extension to get installed
-    - **Important**: Close VS Code before using to make sure the environment variables are loaded at starting VS Code (MAC users must fully quit VSCode, there shoud not be the white dot below the VSCode) <br><br>
+    - **Important**: Close VS Code before using to make sure the environment variables are loaded at starting VS Code (MAC users must fully quit VSCode, there should not be the white dot below the VSCode) <br><br>
 
 ## Requirements
 
