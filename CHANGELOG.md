@@ -1,5 +1,13 @@
 # Change Log
 
+## 1.1.3
+
+- Added possibility to use taskbar items without command defined
+- Implemented GCC Linker output diagnostics
+- Added OTX-MiniDap programmer
+- Improved configure/build fail messaging
+- Programmer selection now via settings (use global settings for default programmer)
+
 ## 1.1.2
 
 - Minor fix at project load where status / taskbar didn't load correctly

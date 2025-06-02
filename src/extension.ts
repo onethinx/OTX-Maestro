@@ -70,7 +70,7 @@ export async function activate(context: vscode.ExtensionContext) {
     if (currentProject.version !== '?')
     {
         try {
-            notJlink = (await selectProg('', true, true)).currentProgrammer !== 'jlink';
+            notJlink = (await getProgrammer()).target !== 'jlink';
         }
         catch {}
     }
@@ -100,72 +100,62 @@ export async function activate(context: vscode.ExtensionContext) {
     let tasksLoaded = false;
     const tasksConfig = vscode.workspace.getConfiguration('tasks');
     if (tasksConfig.tasks && Array.isArray(tasksConfig.tasks)) {
-        for (const task of tasksConfig.tasks) {
-            if (task.command === undefined) { continue; }   
-            const taskOptions = task.options || {};
+        let taskCounter = 0;
+        for (const task of tasksConfig.tasks!) {
+            if (task.command === undefined && task.script === undefined) { continue; }
+
+            // 1) The label the user sees everywhere:
             const taskLabel = task.label || 'Unnamed Task';
-            // Evaluate hide settings for statusbar and sidebar.
-            const statusbarItemHide = evaluateTemplate(taskOptions.statusbar?.hide);
-            const sidebarItemHide = evaluateTemplate(taskOptions.sidebar?.hide);
-        
-            // Extract the underlying command name.
-            const commandName = task.command.replace('${command:', '').replace('}', '');
-            
-            // Register the command for this task regardless of statusbar or sidebar.
-            const taskCommand: vscode.Command = {
-                command: `otx-maestro.taskCommand.${taskLabel.replace(/\s+/g, '-')}`,
-                title: taskLabel
-            };
-            
-            // Look up the command callback.
-            const commandEntry = commands.find(cmd => cmd.command === commandName);
-            if (commandEntry) {
-                vscode.commands.registerCommand(taskCommand.command, () => {
-                    commandEntry.callback(...(task?.args ?? []));
-                });
-            } else {
-                const executeTask = await getTask([taskLabel]);
-                if (executeTask !== undefined) {
-                    vscode.commands.registerCommand(taskCommand.command, async () => {
-                        console.log('Executing task:', taskLabel);
-                        await vscode.tasks.executeTask(executeTask);
-                    });
-                }
-            }
-        
-            // Create statusbar item if enabled.
-            if (taskOptions.statusbar && statusbarItemHide !== 'true') {
+
+            // 2) Your purely-internal, guaranteed-unique ID:
+            const internalId = `otx-maestro.internalTask.${taskCounter++}`;
+
+            // Register the command under your internal ID
+            context.subscriptions.push(
+                vscode.commands.registerCommand(internalId, async () => {
+                    if (task.command && task.command.includes('${command:')) {
+                        const extCmd = task.command.replace(/^\$\{command:(.+)\}$/, '$1');
+                        await vscode.commands.executeCommand(extCmd, ...(task.args ?? []));
+                    } else {
+                        const exitCode = await executeTask([taskLabel]);
+                    }
+                })
+            );
+
+            // Status-bar item uses the user label and the internal ID
+            if (task.options?.statusbar && evaluateTemplate(task.options.statusbar.hide) !== 'true') {
                 tasksLoaded = true;
-                const itemAlignment = taskOptions.statusbar?.alignment === 'right'
-                    ? vscode.StatusBarAlignment.Right
-                    : vscode.StatusBarAlignment.Left;
-                const statusBarItem = vscode.window.createStatusBarItem(itemAlignment, taskOptions.statusbar?.priority);
-                statusBarItem.text = taskOptions.statusbar?.label || taskLabel;
-                statusBarItem.command = taskCommand;
-                statusBarItem.color = taskOptions.statusbar?.color || undefined;
-                statusBarItem.tooltip = taskOptions.statusbar?.detail
-                    ? new vscode.MarkdownString(evaluateTemplate(taskOptions.statusbar.detail))
+                const statusBarItem = vscode.window.createStatusBarItem(task.options.statusbar.alignment === 'right'
+                    ? vscode.StatusBarAlignment.Right : vscode.StatusBarAlignment.Left,
+                    task.options.statusbar.priority
+                );
+                statusBarItem.text    = task.options.statusbar.label || taskLabel;
+                statusBarItem.tooltip = task.options.statusbar.detail
+                    ? new vscode.MarkdownString(evaluateTemplate(task.options.statusbar.detail))
                     : undefined;
+                statusBarItem.command = internalId;
                 statusBarItem.show();
                 context.subscriptions.push(statusBarItem);
             }
-        
-            // Send a message to add a sidebar button if enabled.
-            if (taskOptions.sidebar && sidebarItemHide !== 'true') {
+
+            // Sidebar button also uses the same two
+            if (task.options?.sidebar && evaluateTemplate(task.options.sidebar.hide) !== 'true') {
                 tasksLoaded = true;
                 sidebarProvider.postMessage({
-                    command: 'addSidebarControl',
-                    controlType: 'button',           // This indicates a button control.
-                    label: taskOptions.sidebar?.label || taskLabel,
-                    commandId: taskCommand.command,
-                    color: taskOptions.sidebar?.color,
-                    tooltip: taskOptions.sidebar?.detail ? evaluateTemplate(taskOptions.sidebar.detail) : '',
-                    spacer: taskOptions.sidebar?.spacer === true
+                    command:     'addSidebarControl',
+                    controlType: 'button',
+                    label:       task.options.sidebar.label || taskLabel,
+                    commandId:   internalId,
+                    color:       task.options.sidebar.color,
+                    tooltip:     task.options.sidebar.detail ? evaluateTemplate(task.options.sidebar.detail) : '',
+                    spacer:      task.options.sidebar.spacer === true
                 });
             }
         }
+
     }
     activateWatcher(context);
+    activateDebugWatcher();
     // Refresh tasks if the tasks configuration has changed
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async (event) => {
         if (event.affectsConfiguration('tasks')) {
@@ -191,6 +181,22 @@ export async function activate(context: vscode.ExtensionContext) {
    // else {
         if (currentProject.version !== '?') updateProject(true);
    // }
+}
+
+function activateDebugWatcher()
+{
+    vscode.debug.registerDebugConfigurationProvider('cortex-gdb', {
+        async resolveDebugConfiguration(folder, config, token) {
+            if (config.preLaunchTask !== '${command:otx-maestro.preLaunch}') return config;
+            
+            if (await getSetProgrammer() == false) return undefined;
+        
+            const buildSuccess = await preLaunch() == '';
+            return buildSuccess? config : undefined;
+                vscode.window.showWarningMessage('The build failed. Stopping debug launch.');
+                return undefined;	// aborts debugging silently
+        }
+    });
 }
 
 function activateWatcher(context: vscode.ExtensionContext) {
@@ -271,11 +277,18 @@ class SidebarViewProvider implements vscode.WebviewViewProvider {
             switch (message.command) {
                 case 'sidebarControlButtonClicked':
                     if (message.commandId === 'otx-maestro.showNoTasksInfo') {
-                        vscode.window.showInformationMessage(
-                            "The currently opened folder must directly contain '.vscode/tasks.json'. " +
-                            "Please check that you have opened the correct project folder and not a parent or nested directory.",
-                            { modal: true }
-                        );
+                        if (io.existsFile(['workspace', '.vscode', 'tasks.json'])) {
+                            vscode.window.showInformationMessage(
+                                'Please check to enable the side/statusbar buttons using "options": {"statusbar": {"hide": false}}',
+                                { modal: true }
+                            );
+                        } else {
+                            vscode.window.showInformationMessage(
+                                "The currently opened folder must directly contain '.vscode/tasks.json'. " +
+                                "Please check that you have opened the correct project folder and not a parent or nested directory.",
+                                { modal: true }
+                            );
+                        }
                     } else {
                         vscode.commands.executeCommand(message.commandId)
                             .then(() => console.log(`Executed control button command: ${message.commandId}`));
@@ -1099,7 +1112,8 @@ async function preLaunch() {
     if (projectFileChanged) {
         ret = await build();
         console.log(`prelaunch result" ${ret}`);
-        if (ret === null) ret = "'\n\nResolve problems first";
+        //if (ret === null) ret = "'\n\nResolve problems first";
+        if (ret === null) ret = '-';
     }
     if (ret === '') {
         (async () => {
@@ -1138,19 +1152,16 @@ async function updateProject(startup = false) {
     }
 
     if (versionCompare(onlineProject.version, currentProject.version) !== 'h') {
-        if (!startup)
-        {
-            await vscode.window.showInformationMessage('No newer project version found online.', { modal: true });
-        }
-        return;
+        if (startup) return;
+        const result = await vscode.window.showInformationMessage('No newer project version found online.\nForce update?', { modal: true }, 'Yes', 'No');
+        if (result != 'Yes') return;
     }
 
     const result = await vscode.window.showInformationMessage(
         `Project update from ${currentProject.version} to ${onlineProject.version}.\n\n\
         This will update the meson build files and the configuration files in .vscode.\n\n\
         Backup your project if unsure.\n\nContinue?`, 
-        { modal: true }, 
-        'Yes', 'No'
+        { modal: true }, 'Yes', 'No'
     );
     if (result !== 'Yes') {return;}
 
@@ -1231,7 +1242,8 @@ async function updateProject(startup = false) {
 // ----- clean function ------------------------------------------------------------------------------------------------------------------------------------
 
 async function clean(): Promise<string | null>  {
-	diagnosticCollection.clear();
+	mesonDiagnosticCollection.clear();
+    linkerDiagnostics.clear();
     const setupResult = await checkMesonSetup();
     if (setupResult.status === 'error') {
         const msg = `The Clean task terminated with exit status: ${setupResult.status}\r\n${setupResult.message}\r\nPlease Clean-Reconfigure.`;
@@ -1293,19 +1305,7 @@ async function clean(): Promise<string | null>  {
         const msg = `The Configure task terminated with exit code: ${JSON.stringify(ret)}`;
         return taskStatus(msg, taskResult.errorInform);
     }
-    const selProgResult = await selectProg("", true);
-    if (selProgResult.useDefault === true || selProgResult.currentProgrammer === "") {	// Current programmer is default or not set?
-        var currentProgrammer = getSetting('defaultDebugger');
-        //console.log(`default: ${currentProgrammer}`);
-        if (currentProgrammer === "")
-        { // Default programmer isn't set > show picker
-            await selectProgrammer();
-        }
-        else
-        {	// Default set, select programmer
-            await selectProg("default");
-        }
-    }
+
     creatorProjectChanged = false;
     return taskStatus('', taskResult.ok);
 }
@@ -1317,7 +1317,9 @@ async function build(): Promise<string | null>  {
         const msg = `The PSoC Creator project has been changed.\r\nPlease Clean-Reconfigure.`;
         return taskStatus(msg, taskResult.errorConfirm);
     }
-    diagnosticCollection.clear();
+    mesonDiagnosticCollection.clear();
+    linkerDiagnostics.clear();
+
     const setupResult = await checkMesonSetup();
     if (setupResult.status !== 'ok') {
         const msg = `The Build task terminated with exit status: ${setupResult.status}\r\n${setupResult.message}\r\nPlease Clean-Reconfigure.`;
@@ -1358,20 +1360,182 @@ async function build(): Promise<string | null>  {
         await updateBuildFile(cmakeBuildFile, headerContents, sourceContents, mapCMake);
     }
 
-    //const ret = await executeTask("Meson: build");
-    const ret = await executeTask(['OTX: build', 'Meson: build']);
+    const ret = await executeTaskGetOutput(['OTX: build', 'Meson: build']);
     creatorProjectChanged = false;
-    if (ret === null) { return taskStatus("Error task OTX build", taskResult.errorInform); }
+    if (ret.exitCode === null) { return taskStatus("Error task OTX build", taskResult.errorInform); }
     const mesonResult = await parseMesonLog();
-    if (ret !== 0) 
+    if (ret.exitCode !== 0) 
     {
         vscode.commands.executeCommand('workbench.action.problems.focus');
-        const msg = `The Build task terminated with exit code: ${JSON.stringify(ret)}`;
+        parseLinkerLogLines(ret.output);
+        const msg = `The Build task terminated with exit code: ${JSON.stringify(ret.exitCode)}`;
         return taskStatus(msg, taskResult.errorInform);
     }
     projectFileChanged = false;
     return taskStatus('', taskResult.ok);
 }
+
+// ----- OTX linker output check ----------------------------------------------------------------------------------------------------------------------------
+
+const linkerDiagnostics = vscode.languages.createDiagnosticCollection('otx-linker');
+
+/**
+ * Parse an array of linker-output lines and populate `linkerDiagnostics`.
+ */
+export async function parseLinkerLogLines(output: string): Promise<{ status: string; message: string; errorCount: number }> {
+    const diagnosticsMap: { [file: string]: vscode.Diagnostic[] } = {};
+    let errorCount = 0;
+
+    let buildFile = '';
+    if (io.existsFile(['workspace', 'meson.build'])) { buildFile = io.getPath(['workspace', 'meson.build']); }
+    else if (io.existsFile(['workspace', 'CMakeLists.txt'])) { buildFile = io.getPath(['workspace', 'CMakeLists.txt']); }
+
+    const workspacePath = io.getPath(['workspace']);
+
+    const step1 = output.replace(/\r?\n| {3,}/g, '');
+
+        const step2 = step1.replace(/ld: /g, '\nld: ');
+
+    // 4) Split on the remaining newlines and drop any empty entries
+    const step3 =  step2
+        .split('\n')
+        .map(line => line.trim());
+       // .filter(line => line.startsWith('ld: '));
+
+    for (const line of step3) {
+        //let m: RegExpExecArray | null;
+        const diags: Array<{ message: string; filePath: string; lineNumber: string; severity: vscode.DiagnosticSeverity; }> 
+            = [{ message: '', filePath: workspacePath, lineNumber: '0', severity: vscode.DiagnosticSeverity.Warning }];
+
+        //let message = '';
+        //let filePath = workspacePath;
+        //let lineNumber = '0';
+        //let severity = vscode.DiagnosticSeverity.Warning;
+
+        if (/undefined reference to/.test(line)) {
+            diags[0].message = 'undefined reference';
+            diags[0].severity = vscode.DiagnosticSeverity.Error;
+            const mMsg = /(undefined reference to `[^']+')/.exec(line);
+            if (mMsg) {
+                diags[0].message = mMsg[1];  
+            }
+
+            //const mLoc = /^.*?ld:\s+[^:]+:\s*in function `[^']+':\s*(\/[^:]+\.[^:]+):(\d+):/.exec(line);
+            const mLoc = /ld: (?:.*?: )?(?:in function `[^']+':)?(\/[^:]+):(\d+):/.exec(line);
+            if (mLoc) {
+                diags[0].filePath   = mLoc[1];
+                diags[0].lineNumber = mLoc[2];
+            }
+        }
+
+        if (/multiple definition of/.test(line)) {
+            diags[0].message = 'multiple definition';
+            diags[0].severity = vscode.DiagnosticSeverity.Error;
+
+            // Extract all file:line: patterns
+            const fileMatches = [...line.matchAll(/(\/[^:\s]+\.c):(\d+):/g)];
+
+            if (fileMatches[0]) {
+                diags[0].filePath = fileMatches[0][1];
+                diags[0].lineNumber = fileMatches[0][2];
+            }
+
+            // Extract symbol name
+            const symbolMatch = /multiple definition of [`']([^`']+)[`']/.exec(line);
+            diags[0].message += symbolMatch ? ` of '${symbolMatch[1]}'` : '';
+
+            if (fileMatches.length >= 2) {
+                diags.push({
+                    filePath:   fileMatches[1][1],
+                    lineNumber: fileMatches[1][2],
+                    message:    (symbolMatch ? ` '${symbolMatch[1]}'` : '') + ` first defined here`,
+                    severity:   diags[0].severity
+                });
+            }
+        }
+
+        if (/cannot find entry symbol/.test(line)) {
+            diags[0].message = 'cannot find entry symbol';
+            const reWarning = /^ld:\s*(warning:\s*cannot find entry symbol [^;]+; defaulting to \d+)/.exec(line);
+            if (reWarning) {
+                diags[0].message = reWarning[1]; 
+            }
+        }
+
+        if (/will not fit in region/.test(line)) {
+            diags[0].message = 'memory does not fit';
+            diags[0].severity = vscode.DiagnosticSeverity.Error;
+            const reFit = /^.*?(section\s+`[^`]+'?)\s+(will not fit in region\s+`[^`]+')/.exec(line);
+            if (reFit) {
+                diags[0].message = (reFit[1]?? '') + ' ' + (reFit[2]?? '');
+            }
+        }
+        
+        if (/\b[Rr]egion\b.*?\boverflowed by\b/.test(line)) {
+            diags[0].message = 'memory does not fit';
+            diags[0].severity = vscode.DiagnosticSeverity.Error;
+            const reOf = /\b((?:[Rr]egion)(?:\s+[`']?[^`']+[`']?))\s+(overflowed(?:\s+by\s+\d+\s+bytes?)?)/.exec(line);
+
+            if (reOf) {
+                diags[0].message = (reOf[1]?? '') + ' ' + (reOf[2]?? '');
+            }
+        }
+
+        if (/(?:cannot find directory|[Nn]o such file or directory)/.test(line)) {
+            diags[0].message = 'cannot find file or directory';
+            diags[0].severity = vscode.DiagnosticSeverity.Error;
+            const reDir = /^(?:.*?)(cannot find directory)(\/[^:]+):\s*([Nn]o such file or directory)/.exec(line);
+
+            if (reDir) {
+                diags[0].message = (reDir[1]?? '') + ' ' + (reDir[2]?? '') + ' ' + (reDir[3]?? '');
+            }
+        }
+
+        if (/unrecognized command-line option/.test(line)) {
+            diags[0].severity = vscode.DiagnosticSeverity.Error;
+            diags[0].message = "unrecognized command-line option";
+            diags[0].filePath = buildFile;
+            const reGccOption = /^.*?(unrecognized command-line option '[^']+')(?:;\s*(did you mean '[^']+?'\??))?/.exec(line);
+            if (reGccOption) {
+                diags[0].message = reGccOption[1] + ' ' + (reGccOption[2]?? '');
+            }
+        }
+
+        if (/cannot open linker script/.test(line)) {
+            diags[0].severity = vscode.DiagnosticSeverity.Error;
+            diags[0].message = 'Cannot open linker script. Check the linker reference in meson.build or CMakeLists.txt.';
+            diags[0].filePath = buildFile;
+        }
+
+        if (/error: ld returned /.test(line) && errorCount == 0 && diags[0].message == '') {
+            diags[0].severity = vscode.DiagnosticSeverity.Error;
+            diags[0].message = 'Linker Error, consult TERMINAL output.';
+        }
+
+        if (diags[0].message != '') {
+            for (const { filePath, lineNumber, message, severity } of diags) {
+                const ln = Math.max(0, parseInt(lineNumber, 10) - 1);
+                const range = new vscode.Range(new vscode.Position(ln, 0), new vscode.Position(ln, Number.MAX_SAFE_INTEGER));
+                const diag = new vscode.Diagnostic(range, message, severity);
+                diag.source = 'otx-linker';
+                (diagnosticsMap[filePath] ??= []).push(diag);
+            }
+            errorCount++;
+        }
+    }
+
+    // Push collected diagnostics into the global collection
+    Object.entries(diagnosticsMap).forEach(([file, diags]) => {
+        linkerDiagnostics.set(vscode.Uri.file(file), diags);
+    });
+
+    return {
+        status: errorCount > 0 ? 'error' : 'ok',
+        message: errorCount > 0 ? `Found ${errorCount} linker errors.` : 'No linker errors detected.',
+        errorCount
+    };
+}
+
 
 // ----- launch function ------------------------------------------------------------------------------------------------------------------------------------
 async function launch(mode = "Debug"): Promise<string | null>  {
@@ -1419,90 +1583,9 @@ async function check(): Promise<string | null>  {
     return taskStatus('', taskResult.ok);
 }
 
-
-// ----- select programmer function ------------------------------------------------------------------------------------------------------------------------------------
-
-async function selectProgrammer() {
-    const programmers = [
-        { s: "default", l: "Default (defined in settings.json)" },
-        { s: "kitprog3", l: "Infineon KitProg3 Programmer" },
-        { s: "jlink", l: "SEGGER J-Link Programmer" },
-        { s: "cmsis-dap", l: "CMSIS-DAP Compliant Debugger" },
-        { s: "kitprog", l: "Infineon KitProg Programmer" },
-        { s: "ulink", l: "Keil ULINK JTAG Programmer" },
-        { s: "stlink", l: "ST-Link Programmer" },
-        { s: "ft232r", l: "Bitbang mode of FT232R based devices" },
-        { s: "ftdi", l: "MPSSE mode of FTDI based devices" },
-        { s: "buspirate", l: "Bus Pirate" },
-        { s: "altera-usb-blaster", l: "Altera USB-Blaster Compatible" },
-        { s: "altera-usb-blaster2", l: "Altera USB-Blaster II Compatible" },
-        { s: "usbprog", l: "USBProg JTAG Programmer" },
-        { s: "arm-jtag-ew", l: "Olimex ARM-JTAG-EW Programmer" },
-        { s: "angie", l: "ANGIE Adapter" },
-        { s: "vsllink", l: "Versaloon-Link JTAG Programmer" },
-        { s: "osbdm", l: "OSBDM (JTAG only) Programmer" },
-        { s: "opendous", l: "eStick/opendous JTAG Programmer" },
-        { s: "rlink", l: "Raisonance RLink JTAG Programmer" },
-        { s: "nulink", l: "Nu-Link Programmer" },
-        { s: "presto", l: "ASIX Presto Adapter" },
-        { s: "openjtag", l: "OpenJTAG Adapter" },
-        { s: "linuxgpiod", l: "Linux GPIO bitbang through libgpiod" },
-        { s: "xds110", l: "TI XDS110 Debug Probe" },
-        { s: "ti-icdi", l: "TI ICDI JTAG Programmer" },
-    ];
-    // Check for default programmer
-    let currentProgrammer = getSetting('defaultDebugger');
-    let useDefault = false;
-    if (currentProgrammer === '') { ( {useDefault, currentProgrammer} = await selectProg("", true)); }
-
-    const index = programmers.findIndex(prog => prog.s === currentProgrammer);
-    console.log(`${currentProgrammer} - ${index}`);
-    const progNames = programmers.map(prog => prog.l);
-    // Create a Quick Pick instance
-    const quickPick = vscode.window.createQuickPick();
-    quickPick.canSelectMany = false;
-    quickPick.placeholder = 'Select a programmer';
-
-    // Set Quick Pick items
-    quickPick.items = progNames.map(name => ({ label: name }));
-
-    // Pre-select an item
-    quickPick.activeItems = [quickPick.items[index]];
-
-    // Show the Quick Pick
-    quickPick.show();
-
-    // Handle the selection
-    quickPick.onDidAccept(async () => {
-        const selected = quickPick.selectedItems[0];
-        if (selected) {
-            //console.log("Selected programmer:", selected.label);
-            const programmer = programmers.find(prog => prog.l === selected.label);
-            if (programmer)
-            {
-                const currentProg = (await selectProg(programmer.s)).currentProgrammer;
-                const msg = (programmer.s === 'default')? `Default ('${currentProg}' in settings.json)` : selected.label;
-                vscode.window.showInformationMessage(`You selected: ${msg}`);
-                const isJlink = currentProg === 'jlink';
-                if (isJlink === notJlink) {
-                // Refresh tasks if the tasks configuration has changed
-                    const confirm = await vscode.window.showInformationMessage(
-                        'The JLink configuration is changed. Do you want to reload the window to apply changes?', { modal: true }, 'Yes', 'No'
-                    );
-                    if (confirm === 'Yes') {
-                        vscode.commands.executeCommand('workbench.action.reloadWindow');
-                    }
-                    notJlink = !isJlink;
-                }
-            }
-            quickPick.dispose();
-        }
-    });
-}
-
 // ----- meson config functions ------------------------------------------------------------------------------------------------------------------------------------
 
-const diagnosticCollection = vscode.languages.createDiagnosticCollection('meson');
+const mesonDiagnosticCollection = vscode.languages.createDiagnosticCollection('meson');
 
 async function checkMesonSetup(): Promise<{status: string, message: string}>  {
     if (!io.existsFile(['workspace', 'build'])) { return { 'status': 'missing', 'message': "Missing Build Folder" }; }
@@ -1602,18 +1685,19 @@ async function parseMesonLog(): Promise<{ status: string, message: string, error
             if (lineNumber < 0 ) { lineNumber = 0; }
             if (columnNumber < 0 ) { columnNumber = 0; }
             const range = new vscode.Range(new vscode.Position(lineNumber, columnNumber), new vscode.Position(lineNumber, columnNumber + 1));
-            const diagnostic = new vscode.Diagnostic(range, errorMessage, errMatch? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning);
-
+            const diag = new vscode.Diagnostic(range, errorMessage, errMatch? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning);
+            diag.source = 'otx-meson';
+            
             const absoluteFilePath = io.getPath(['workspace', filePath]);
             if (!diagnosticsMap[absoluteFilePath]) {
                 diagnosticsMap[absoluteFilePath] = [];
             }
-            diagnosticsMap[absoluteFilePath].push(diagnostic);
+            diagnosticsMap[absoluteFilePath].push(diag);
             if (errMatch) { errorCount++; }
         }
     }
     Object.keys(diagnosticsMap).forEach(fileUri => {
-        diagnosticCollection.set(vscode.Uri.file(fileUri), diagnosticsMap[fileUri]);
+        mesonDiagnosticCollection.set(vscode.Uri.file(fileUri), diagnosticsMap[fileUri]);
     });
     return { status: 'ok', message: 'OK', errorCount: errorCount };
 }
@@ -1680,19 +1764,66 @@ async function getTask(taskNames: string[]): Promise<vscode.Task | undefined> {
 
 async function executeTask(taskNames: string[]): Promise<number | undefined> {   
     const task = await getTask(taskNames);
-    if (task === undefined) { return; }
+    if (!task) { return; }
     console.log(`--- execute task: ${task.name}`);
-    if (task) {
-        const taskExecution = await vscode.tasks.executeTask(task);
-        return new Promise<number | undefined>((resolve) => {
-            const disposable = vscode.tasks.onDidEndTaskProcess(e => {
-                if (e.execution === taskExecution || e.execution.task === task) {
-                    disposable.dispose();
-                    resolve(e.exitCode);
-                }
-            });
+    const taskExecution = await vscode.tasks.executeTask(task);
+    return new Promise<number | undefined>((resolve) => {
+        const disposable = vscode.tasks.onDidEndTaskProcess(e => {
+            if (e.execution === taskExecution || e.execution.task === task) {
+                disposable.dispose();
+                resolve(e.exitCode);
+            }
         });
-    }
+    });
+}
+
+
+async function executeTaskGetOutput( taskNames: string[] ): Promise<{ exitCode: number | undefined; output: string }> {
+    const task = await getTask(taskNames);
+    if (!task) { return { exitCode: undefined, output: '' }; }
+    console.log(`--- execute task: ${task.name}`);
+
+    return new Promise((resolve, reject) => {
+        let capturedExitCode: number | undefined;
+
+        // 1) Listen for the task to finish
+        const endDisp = vscode.tasks.onDidEndTaskProcess(async e => {
+            if (e.execution.task.name !== task.name) {
+                return;
+            }
+            // only handle once
+            endDisp.dispose();
+
+            capturedExitCode = e.exitCode;
+
+            // 2) Find the terminal that ran the task
+            const term =
+                vscode.window.terminals.find(t => t.name === task.name) ||
+                vscode.window.activeTerminal;
+            if (!term) {
+                return reject(new Error(`Terminal for task "${task.name}" not found.`));
+            }
+            // ensure it has focus so copy command works
+            term.show(true);
+
+            try {
+                const originalClipboard = await vscode.env.clipboard.readText();
+                // Run the command that overwrites the clipboard
+                await vscode.commands.executeCommand('workbench.action.terminal.copyLastCommandOutput');
+
+                const text = await vscode.env.clipboard.readText();
+                // Restore original clipboard
+                await vscode.env.clipboard.writeText(originalClipboard);
+
+                resolve({ exitCode: capturedExitCode, output: text });
+            } catch (err) {
+                reject(err);
+            }
+        });
+
+        // 5) Kick off the task (no need to await here)
+        vscode.tasks.executeTask(task);
+    });
 }
 
 enum taskResult {
@@ -1776,7 +1907,226 @@ async function updateVersionInFile(file: string[], newVersion: string) {
 
 // ----- programmer selection functions ------------------------------------------------------------------------------------------------------------------------------------
 
-async function selectProg(programmer: string, checkOnly: boolean = false, noWarning: boolean = false): Promise<{useDefault: boolean, currentProgrammer: string}> {
+async function selectProgrammer(): Promise<boolean> {       // Launch programmer picker
+    const programmer = await getProgrammer();
+    const programmers: { s: string, l: string }[] = [];
+
+    // Conditionally add the "default" option
+    if (programmer.global !== undefined) {
+        programmers.push(
+            { s: "default", l: `Default (${programmer.global}, defined in global settings.json)` }
+        );
+    }
+    programmers.push(
+        { s: "kitprog3", l: "Infineon KitProg3 Programmer" },
+        { s: "jlink", l: "SEGGER J-Link Programmer" },
+        { s: "otx-minidap", l: "Onethinx MiniDap Programmer" },
+        { s: "cmsis-dap", l: "CMSIS-DAP Compliant Debugger" },
+        { s: "kitprog", l: "Infineon KitProg Programmer" },
+        { s: "ulink", l: "Keil ULINK JTAG Programmer" },
+        { s: "stlink", l: "ST-Link Programmer" },
+        { s: "ft232r", l: "Bitbang mode of FT232R based devices" },
+        { s: "ftdi", l: "MPSSE mode of FTDI based devices" },
+        { s: "buspirate", l: "Bus Pirate" },
+        { s: "altera-usb-blaster", l: "Altera USB-Blaster Compatible" },
+        { s: "altera-usb-blaster2", l: "Altera USB-Blaster II Compatible" },
+        { s: "usbprog", l: "USBProg JTAG Programmer" },
+        { s: "arm-jtag-ew", l: "Olimex ARM-JTAG-EW Programmer" },
+        { s: "angie", l: "ANGIE Adapter" },
+        { s: "vsllink", l: "Versaloon-Link JTAG Programmer" },
+        { s: "osbdm", l: "OSBDM (JTAG only) Programmer" },
+        { s: "opendous", l: "eStick/opendous JTAG Programmer" },
+        { s: "rlink", l: "Raisonance RLink JTAG Programmer" },
+        { s: "nulink", l: "Nu-Link Programmer" },
+        { s: "presto", l: "ASIX Presto Adapter" },
+        { s: "openjtag", l: "OpenJTAG Adapter" },
+        { s: "linuxgpiod", l: "Linux GPIO bitbang through libgpiod" },
+        { s: "xds110", l: "TI XDS110 Debug Probe" },
+        { s: "ti-icdi", l: "TI ICDI JTAG Programmer" },
+    );
+
+    const index = programmers.findIndex(prog => prog.s === programmer.target);
+    const progNames = programmers.map(prog => prog.l);
+
+    return new Promise<boolean>((resolve) => {
+        const quickPick = vscode.window.createQuickPick();
+        quickPick.canSelectMany = false;
+        quickPick.placeholder = 'Select a programmer';
+        quickPick.items = progNames.map(name => ({ label: name }));
+        let didAccept = false;
+
+        // Pre-select an item if found
+        if (index !== -1) {
+            quickPick.activeItems = [quickPick.items[index]];
+        }
+
+        quickPick.onDidAccept(async () => {
+            didAccept = true;
+            let result = false;
+            const selected = quickPick.selectedItems[0];
+            if (selected) {
+                const selectedProgrammer = programmers.find(prog => prog.l === selected.label);
+                if (selectedProgrammer) {
+                    vscode.window.showInformationMessage(`You selected: ${selected.label}`);
+                    const defaultProg = selectedProgrammer.s === 'default';
+                    result = await setProgrammer(selectedProgrammer.s, defaultProg);
+                }
+            }
+            resolve(result); // Fallback if no valid selection
+            quickPick.dispose();
+        });
+
+        quickPick.onDidHide(() => {
+            if (didAccept) return;
+            quickPick.dispose();
+            resolve(false); // User cancelled
+        });
+        quickPick.show();
+    });
+}
+
+async function getSetProgrammer() {
+    const programmer = await getProgrammer();
+    if (programmer.notSet)
+    {
+        if (programmer.board != undefined)
+        {
+            if (programmer.board == "cmsis-dap-old")
+            {
+                const setPrgFromBrd = await vscode.window.showInformationMessage(
+                    `Programmer not set.\nDo want to set the OTX-Minidap?`, { modal: true }, 'Yes', 'No', 
+                );
+                if (setPrgFromBrd === 'Yes')
+                {
+                    return await setProgrammer('otx-minidap', false);
+                }
+            } else {
+                const setPrgFromBrd = await vscode.window.showInformationMessage(
+                    `Programmer not set.\nUse '${programmer.board}' from brd.cfg?`, { modal: true }, 'Yes', 'No', 
+                );
+                if (setPrgFromBrd === 'Yes')
+                {
+                    return await setProgrammer(programmer.board, false);
+                }
+            }
+        }
+        return await selectProgrammer();
+    }
+    return await setProgrammer(programmer.target!, programmer.useDefault);
+}
+
+let boardProgrammer: string | undefined = undefined;
+
+async function getProgrammer(): Promise<{ target: string | undefined; global: string | undefined; board: string | undefined; notSet: boolean; useDefault: boolean;}>{
+    const config = vscode.workspace.getConfiguration('otx-maestro');
+
+    let target = config.get<string | undefined>('programmer');
+
+    const inspect = config.inspect<string>('programmer');
+    const global = inspect?.globalValue;
+    const local = inspect?.workspaceFolderValue ?? inspect?.workspaceValue;
+
+    const useDefault = local === undefined;
+    const notSet = global === undefined && useDefault;
+    
+    if (boardProgrammer == undefined)
+    {
+        const boardSettingsFile = ['workspace', '.vscode', 'brd.cfg'];
+        if (io.existsFile(boardSettingsFile)) {
+            // Read the board settings file content
+            const boardSettingsLines: string[] = await io.getFile(boardSettingsFile, io.returnedContent.stringArray);
+            const boardMatch = boardSettingsLines[0].match(/PROGRAMMER\s+([^\s;]+)/);
+            boardProgrammer = boardMatch? boardMatch[1] : undefined;
+            const isNewBoard = boardSettingsLines.some(line => line.includes('otx-minidap'));
+            if (!isNewBoard && boardProgrammer == 'cmsis-dap') boardProgrammer = 'cmsis-dap-old'
+        }
+    }
+    const board = boardProgrammer;
+    return {target, global, board, notSet, useDefault};
+}
+
+async function setProgrammer(programmer: string, setDefault: boolean)
+{
+    let newProg = setDefault? undefined : programmer;
+    const config = vscode.workspace.getConfiguration('otx-maestro');
+    const inspect = config.inspect<string>('programmer');
+    const local = inspect?.workspaceFolderValue ?? inspect?.workspaceValue;
+    if (local != newProg) {
+        try {
+            await config.update('programmer', newProg, vscode.ConfigurationTarget.Workspace);
+        }
+        catch (err) {
+            vscode.window.showErrorMessage(`Error saving default programmer: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            return false;
+        }
+    }
+
+    if (programmer !== boardProgrammer) {
+        
+        const boardSettingsFile = ['workspace', '.vscode', 'brd.cfg'];
+
+        if (!io.existsFile(boardSettingsFile)) {
+            vscode.window.showErrorMessage(`.vscode/brd.cfg is missing.\nPlease update project.`, { modal: true });
+            return false;
+        }
+
+        // Read the board settings file content
+        let boardSettingsLines: string[] = await io.getFile(boardSettingsFile, io.returnedContent.stringArray);
+
+        // Prepare the new line and update settings
+        let skipSave = false;
+        const newLine = `set PROGRAMMER ${programmer}`;
+        if (!boardSettingsLines[0].includes('PROGRAMMER')) {
+            boardSettingsLines.unshift(newLine);
+        } else {
+            if (boardSettingsLines[0] == newLine) skipSave = true;
+            else boardSettingsLines[0] = newLine;
+        }
+        const isNewBoardFile = boardSettingsLines.some(line => line.includes('otx-minidap'));
+        if (!skipSave || !isNewBoardFile) {
+            const toWrite =  isNewBoardFile? boardSettingsLines : transformTcl(boardSettingsLines);
+            await io.writeFile(boardSettingsFile, toWrite.join('\n'));
+        }
+    }
+
+    // Refresh tasks if JLink configuration is changed
+    const isJlink = programmer === 'jlink';
+    if (isJlink === notJlink) {
+        const confirm = await vscode.window.showInformationMessage(
+            'The JLink configuration is changed. Do you want to reload the window to apply changes?', { modal: true }, 'Yes', 'No'
+        );
+        if (confirm === 'Yes') {
+            vscode.commands.executeCommand('workbench.action.reloadWindow');
+        }
+        notJlink = !isJlink;
+    }
+    return true;
+}
+
+function transformTcl(lines: string[]): string[] {
+    const result: string[] = [];
+
+    for (let line of lines) {
+        // Replace `"cmsis-dap" {` → `"otx-minidap" {`
+        if (line.includes('"cmsis-dap" {')) {
+            line = line.replace('cmsis-dap', 'otx-minidap');
+        }
+
+        // Replace source line if matched
+        if (line.trim() === 'source [find interface/${PROGRAMMER}.cfg]') {
+            result.push('if {${PROGRAMMER} == "otx-minidap"} {');
+            result.push('    source [find interface/cmsis-dap.cfg]');
+            result.push('} else {');
+            result.push('    source [find interface/${PROGRAMMER}.cfg]');
+            line = '}';
+        }
+        result.push(line);
+    }
+    vscode.window.showInformationMessage('Updated outdated brd.cfg');
+    return result;
+}
+
+async function selectProgOLD(programmer: string, checkOnly: boolean = false, noWarning: boolean = false): Promise<{useDefault: boolean, currentProgrammer: string}> {
     // Substitute environment variables and get the base path
     const packFolder = util.substituteVariables('${env:ONETHINX_PACK_LOC}');
     
